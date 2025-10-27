@@ -69,6 +69,7 @@ class CharacterCreationDialog(QDialog):
         self.age_input.setPlaceholderText("Zahl eingeben")
         self.hitpoints_input = QLineEdit()
         self.hitpoints_input.setPlaceholderText("Zahl eingeben")
+        self.hitpoints_input.textChanged.connect(self.update_base_hitpoints)
         self.build_input = QComboBox()
         self.build_input.addItems(["Schlank", "Durchschnittlich", "Kräftig"])
         self.religion_input = QLineEdit()
@@ -136,6 +137,8 @@ class CharacterCreationDialog(QDialog):
         self.conditions_layout.addWidget(self.condition_add_button)
         self.conditions_group.setLayout(self.conditions_layout)
         main_layout.addWidget(self.conditions_group)
+
+        self.base_hitpoints = 0
 
 
         # Speichern-Button
@@ -438,30 +441,41 @@ class CharacterCreationDialog(QDialog):
 
     def apply_mission_effects(self):
         """Aktualisiert alle missionsweiten Effekte auf den Charakterwerten."""
-        # Lebenspunkte-Basiswert
-        try:
-            base_hp = int(self.hitpoints_input.text()) if self.hitpoints_input.text() else 0
-        except ValueError:
-            base_hp = 0
-
+        base_hp = self.base_hitpoints
         total_hp_modifier = 0
         affecting_conditions = []
 
-        # alle Zustände durchgehen
         for cond_name, cond in self.condition_groups.items():
             if cond["type"] == "missionsweit" and cond["effect_target"] == "Lebenspunkte":
                 total_hp_modifier += cond["effect_value"]
                 affecting_conditions.append(f"{cond_name} ({cond['effect_value']:+})")
 
-        # neuen Text setzen
         modified_hp = base_hp + total_hp_modifier
+
         if affecting_conditions:
             self.hitpoints_input.setStyleSheet("color: red; font-weight: bold;")
-            self.hitpoints_input.setText(str(modified_hp))
             tooltip = " | ".join(affecting_conditions)
             self.hitpoints_input.setToolTip(f"Modifiziert durch: {tooltip}")
+            # Anzeige anpassen, aber Basiswert beibehalten
+            self.hitpoints_input.blockSignals(True)
+            self.hitpoints_input.setText(str(modified_hp))
+            self.hitpoints_input.blockSignals(False)
         else:
+            self.hitpoints_input.blockSignals(True)
+            self.hitpoints_input.setText(str(base_hp))
+            self.hitpoints_input.blockSignals(False)
             self.hitpoints_input.setStyleSheet("")
+            self.hitpoints_input.setToolTip("")
+
+
+    def update_base_hitpoints(self):
+        """Aktualisiert den gespeicherten Basiswert, wenn der Nutzer Lebenspunkte manuell ändert."""
+        try:
+            # Wenn der Nutzer gerade einen Wert eingibt, interpretieren wir ihn als Basiswert
+            self.base_hitpoints = int(self.hitpoints_input.text())
+        except ValueError:
+            # keine Zahl → ignorieren
+            self.base_hitpoints = 0
 
 
     def save_character(self):
@@ -472,7 +486,7 @@ class CharacterCreationDialog(QDialog):
             age = int(self.age_input.text())
             if not 1 <= age <= 120:
                 raise ValueError("Alter muss zwischen 1 und 120 liegen.")
-            hitpoints = int(self.hitpoints_input.text())
+            hitpoints = self.base_hitpoints
             if not 1 <= hitpoints <= 100:
                 raise ValueError("Lebenspunkte müssen zwischen 1 und 100 liegen.")
             religion = self.religion_input.text().strip()
@@ -551,7 +565,8 @@ class CharacterCreationDialog(QDialog):
         self.class_input.setCurrentText(character.get("class", "Krieger"))
         self.gender_input.setCurrentText(character.get("gender", "Männlich"))
         self.age_input.setText(str(character.get("age", "")))
-        self.hitpoints_input.setText(str(character.get("hitpoints", "")))
+        self.base_hitpoints = int(character.get("hitpoints", 0))
+        self.hitpoints_input.setText(str(self.base_hitpoints))
         self.build_input.setCurrentText(character.get("build", "Durchschnittlich"))
         self.religion_input.setText(character.get("religion", ""))
         self.occupation_input.setText(character.get("occupation", ""))
