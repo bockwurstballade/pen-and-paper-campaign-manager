@@ -3,8 +3,10 @@ import json
 import os
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
-    QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox, QInputDialog, QHBoxLayout
+    QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
+    QInputDialog, QHBoxLayout, QFileDialog
 )
+
 from PyQt6.QtCore import Qt
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -45,7 +47,10 @@ class AttributeDialog(QDialog):
         return name, value if name and value else (None, None)
 
 class CharacterCreationDialog(QDialog):
+
     def __init__(self, parent=None):
+        self.loaded_file = None  # Wird gesetzt, wenn Charakter geladen wurde
+
         super().__init__(parent)
         self.setWindowTitle("Neuen Charakter erstellen")
         self.setGeometry(150, 150, 450, 700)
@@ -86,6 +91,7 @@ class CharacterCreationDialog(QDialog):
         # Fähigkeiten
         self.skills = {"Handeln": [], "Wissen": [], "Soziales": []}
         self.skill_inputs = {}
+        self.skill_end_labels = {}
         self.category_labels = {}
         self.inspiration_labels = {}
         self.group_boxes = {}
@@ -141,24 +147,27 @@ class CharacterCreationDialog(QDialog):
 
         # Fähigkeit hinzufügen
         self.skills[category].append(skill_name)
+        self.skill_end_labels.setdefault(category, {})
 
-        # Eingabefeld + Entfernen-Button
+        # Eingabefeld + Entfernen-Button + Endwert-Label
         input_field = QLineEdit()
         input_field.setPlaceholderText("0–100")
         input_field.textChanged.connect(self.update_points)
 
+        end_label = QLabel("Endwert: 0")
+        self.skill_end_labels[category][skill_name] = end_label
+
         remove_button = QPushButton("– Entfernen")
         remove_button.clicked.connect(lambda _, cat=category, skill=skill_name: self.remove_skill(cat, skill))
 
+        # Layout der Zeile
         h_layout = QHBoxLayout()
         h_layout.addWidget(input_field)
+        h_layout.addWidget(end_label)
         h_layout.addWidget(remove_button)
 
-        # Zeile zum bestehenden FormLayout hinzufügen
-        self.form_layouts[category].addRow(f"{skill_name}:", h_layout)
-
-        # Intern speichern
         self.skill_inputs[category][skill_name] = input_field
+        self.form_layouts[category].addRow(f"{skill_name}:", h_layout)
         self.update_points()
 
 
@@ -169,6 +178,8 @@ class CharacterCreationDialog(QDialog):
 
         self.skills[category].remove(skill_name)
         input_field = self.skill_inputs[category].pop(skill_name)
+        if skill_name in self.skill_end_labels.get(category, {}):
+            del self.skill_end_labels[category][skill_name]
 
         # Layoutzeile im FormLayout finden und entfernen
         form_layout = self.form_layouts[category]
@@ -257,17 +268,34 @@ class CharacterCreationDialog(QDialog):
                         else:
                             input_field.setText("")
                             raise ValueError(f"{skill}: Wert muss zwischen 0 und 100 liegen.")
-                total_used += category_sum
+                # Kategorie-Wert berechnen
                 category_score = kaufmaennisch_runden(category_sum / 10)
                 self.category_labels[category].setText(f"{category}-Wert: {category_score}")
+
+                # Geistesblitzpunkte berechnen
                 inspiration_points = kaufmaennisch_runden(category_sum / (10 * 10))
                 self.inspiration_labels[category].setText(f"Geistesblitzpunkte ({category}): {inspiration_points}")
+
+                # Endwerte für Fähigkeiten aktualisieren
+                for skill, input_field in self.skill_inputs[category].items():
+                    try:
+                        val = int(input_field.text()) if input_field.text() else 0
+                    except ValueError:
+                        val = 0
+                    end_value = val + category_score
+                    if category in self.skill_end_labels and skill in self.skill_end_labels[category]:
+                        self.skill_end_labels[category][skill].setText(f"Endwert: {end_value}")
+
+                total_used += category_sum
+
             remaining = 400 - total_used
             self.total_points_label.setText(f"Verbleibende Punkte: {remaining}")
             if remaining < 0:
                 raise ValueError("Gesamtpunkte überschreiten 400!")
+
         except ValueError as e:
             QMessageBox.warning(self, "Fehler", str(e))
+
 
     def save_character(self):
         try:
@@ -325,9 +353,78 @@ class CharacterCreationDialog(QDialog):
             "items": items_data
         }
 
-        self.save_to_json(character)
-        QMessageBox.information(self, "Erfolg", f"Charakter {name} wurde gespeichert!")
+        if self.loaded_file:
+            with open(self.loaded_file, "w", encoding="utf-8") as f:
+                json.dump(character, f, indent=4, ensure_ascii=False)
+            QMessageBox.information(self, "Erfolg", f"Charakter '{name}' wurde aktualisiert!")
+        else:
+            self.save_to_json(character)
+            QMessageBox.information(self, "Erfolg", f"Neuer Charakter '{name}' wurde gespeichert!")
+
         self.accept()
+
+    def load_character_data(self, character, file_path):
+        """Befüllt das Formular mit den Daten eines geladenen Charakters."""
+        self.loaded_file = file_path
+
+        self.name_input.setText(character.get("name", ""))
+        self.class_input.setCurrentText(character.get("class", "Krieger"))
+        self.gender_input.setCurrentText(character.get("gender", "Männlich"))
+        self.age_input.setText(str(character.get("age", "")))
+        self.hitpoints_input.setText(str(character.get("hitpoints", "")))
+        self.build_input.setCurrentText(character.get("build", "Durchschnittlich"))
+        self.religion_input.setText(character.get("religion", ""))
+        self.occupation_input.setText(character.get("occupation", ""))
+        self.marital_status_input.setCurrentText(character.get("marital_status", "Ledig"))
+
+        # Fähigkeiten wiederherstellen
+        for category, skills in character.get("skills", {}).items():
+            for skill, value in skills.items():
+                self.skills[category].append(skill)
+                input_field = QLineEdit(str(value))
+                input_field.textChanged.connect(self.update_points)
+
+                end_label = QLabel("Endwert: 0")
+                self.skill_end_labels.setdefault(category, {})[skill] = end_label
+
+                remove_button = QPushButton("– Entfernen")
+                remove_button.clicked.connect(lambda _, cat=category, skill=skill: self.remove_skill(cat, skill))
+
+                h_layout = QHBoxLayout()
+                h_layout.addWidget(input_field)
+                h_layout.addWidget(end_label)
+                h_layout.addWidget(remove_button)
+                self.form_layouts[category].addRow(f"{skill}:", h_layout)
+
+                self.skill_inputs[category][skill] = input_field
+
+        # Items wiederherstellen
+        for item_name, attributes in character.get("items", {}).items():
+            self.item_groups[item_name] = {"attributes": {}, "layout": None, "group": None}
+            item_group = QGroupBox(item_name)
+            item_layout = QVBoxLayout()
+
+            attr_layout = QFormLayout()
+            for attr_name, attr_value in attributes.items():
+                attr_layout.addRow(f"{attr_name}:", QLabel(str(attr_value)))
+                self.item_groups[item_name]["attributes"][attr_name] = attr_value
+
+            add_attr_button = QPushButton("+ Neue Eigenschaft")
+            add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
+            remove_button = QPushButton("- Item entfernen")
+            remove_button.clicked.connect(lambda _, item=item_name: self.remove_item(item))
+
+            item_layout.addLayout(attr_layout)
+            item_layout.addWidget(add_attr_button)
+            item_layout.addWidget(remove_button)
+            item_group.setLayout(item_layout)
+
+            self.items_layout.insertWidget(self.items_layout.count() - 1, item_group)
+            self.item_groups[item_name]["layout"] = item_layout
+            self.item_groups[item_name]["group"] = item_group
+
+        self.update_points()
+
 
     def get_next_id(self):
         characters = self.load_characters()
@@ -369,11 +466,50 @@ class WelcomeWindow(QMainWindow):
         start_button.clicked.connect(self.start_character_creation)
         layout.addWidget(start_button)
 
+        load_button = QPushButton("Bestehenden Charakter laden", self)
+        load_button.clicked.connect(self.load_character)
+        layout.addWidget(load_button)
+
         layout.addStretch()
+
 
     def start_character_creation(self):
         dialog = CharacterCreationDialog(self)
         dialog.exec()
+
+    def load_character(self):
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Charakterdatei öffnen",
+            "",
+            "JSON Dateien (*.json);;Alle Dateien (*)"
+        )
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden der Datei:\n{e}")
+            return
+
+        # Prüfen, ob Datei eine Liste oder Sammlung enthält
+        if isinstance(data, dict) and "characters" in data:
+            characters = data["characters"]
+            if not characters:
+                QMessageBox.warning(self, "Fehler", "Keine Charaktere in der Datei gefunden.")
+                return
+
+            # Falls mehrere vorhanden, optional Auswahldialog (später)
+            character = characters[0]  # aktuell: immer ersten laden
+        else:
+            character = data  # einzelner Charakter direkt gespeichert
+
+        dialog = CharacterCreationDialog(self)
+        dialog.load_character_data(character, file_name)
+        dialog.exec()
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
