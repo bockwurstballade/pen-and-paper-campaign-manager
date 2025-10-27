@@ -141,6 +141,14 @@ class CharacterCreationDialog(QDialog):
         self.base_hitpoints = 0
 
 
+        self.base_values = {
+            "Lebenspunkte": 0,
+            "Kategorien": {},        # z. B. {"Handeln": 5}
+            "Geistesblitzpunkte": {},# z. B. {"Wissen": 1}
+            "Fertigkeiten": {}       # z. B. {"Laufen": 50}
+        }
+
+
         # Speichern-Button
         save_button = QPushButton("Charakter speichern")
         save_button.clicked.connect(self.save_character)
@@ -382,6 +390,7 @@ class CharacterCreationDialog(QDialog):
         # missionsweite Effekte sofort anwenden
         if effect_type == "missionsweit":
             self.apply_mission_effects()
+            self.apply_all_mission_effects()
 
 
 
@@ -395,6 +404,8 @@ class CharacterCreationDialog(QDialog):
             QMessageBox.information(self, "Erfolg", f"Zustand '{condition_name}' wurde entfernt.")
         # Falls missionsweite Effekte betroffen sind → aktualisieren
         self.apply_mission_effects()
+        self.apply_all_mission_effects()
+
 
 
     def update_points(self):
@@ -432,9 +443,27 @@ class CharacterCreationDialog(QDialog):
                 total_used += category_sum
 
             remaining = 400 - total_used
+            # Basiswerte für spätere Zustandsanwendung speichern
+            for category in self.skills:
+                category_label_text = self.category_labels[category].text()
+                cat_value = int(category_label_text.split(":")[-1].strip())
+                self.base_values["Kategorien"][category] = cat_value
+
+                insp_label_text = self.inspiration_labels[category].text()
+                insp_value = int(insp_label_text.split(":")[-1].strip().replace("Geistesblitzpunkte", "").strip())
+                self.base_values["Geistesblitzpunkte"][category] = insp_value
+
+                for skill, input_field in self.skill_inputs[category].items():
+                    try:
+                        val = int(input_field.text()) if input_field.text() else 0
+                    except ValueError:
+                        val = 0
+                    self.base_values["Fertigkeiten"][skill] = val
+
             self.total_points_label.setText(f"Verbleibende Punkte: {remaining}")
             if remaining < 0:
                 raise ValueError("Gesamtpunkte überschreiten 400!")
+            self.update_endwert_labels()
 
         except ValueError as e:
             QMessageBox.warning(self, "Fehler", str(e))
@@ -466,6 +495,110 @@ class CharacterCreationDialog(QDialog):
             self.hitpoints_input.blockSignals(False)
             self.hitpoints_input.setStyleSheet("")
             self.hitpoints_input.setToolTip("")
+
+    def apply_all_mission_effects(self):
+        """Wendet alle missionsweiten Zustände auf Lebenspunkte, Kategorien, Geistesblitzpunkte und Fertigkeiten an."""
+        # 1️⃣ Starte mit sauberen Basiswerten
+        self.apply_mission_effects()  # HP separat behandeln
+
+        # 2️⃣ Kategorie-Labels anpassen
+        for category, base_val in self.base_values["Kategorien"].items():
+            total_modifier = 0
+            affecting = []
+            for cond_name, cond in self.condition_groups.items():
+                if cond["type"] == "missionsweit" and cond["effect_target"] == f"Kategoriewert: {category}":
+                    total_modifier += cond["effect_value"]
+                    affecting.append(f"{cond_name} ({cond['effect_value']:+})")
+
+            modified_val = base_val + total_modifier
+            if affecting:
+                self.category_labels[category].setText(f"{category}-Wert: {modified_val} (Mod: {'; '.join(affecting)})")
+                self.category_labels[category].setStyleSheet("color: darkred; font-weight: bold;")
+            else:
+                self.category_labels[category].setText(f"{category}-Wert: {base_val}")
+                self.category_labels[category].setStyleSheet("")
+
+        # 3️⃣ Geistesblitzpunkte anpassen
+        for category, base_val in self.base_values["Geistesblitzpunkte"].items():
+            total_modifier = 0
+            affecting = []
+            for cond_name, cond in self.condition_groups.items():
+                if cond["type"] == "missionsweit" and cond["effect_target"] == f"Geistesblitzpunkte: {category}":
+                    total_modifier += cond["effect_value"]
+                    affecting.append(f"{cond_name} ({cond['effect_value']:+})")
+
+            modified_val = base_val + total_modifier
+            if affecting:
+                self.inspiration_labels[category].setText(f"Geistesblitzpunkte ({category}): {modified_val} (Mod: {'; '.join(affecting)})")
+                self.inspiration_labels[category].setStyleSheet("color: darkblue; font-weight: bold;")
+            else:
+                self.inspiration_labels[category].setText(f"Geistesblitzpunkte ({category}): {base_val}")
+                self.inspiration_labels[category].setStyleSheet("")
+
+        # 4️⃣ Fertigkeiten anpassen
+        for skill, base_val in self.base_values["Fertigkeiten"].items():
+            total_modifier = 0
+            affecting = []
+            for cond_name, cond in self.condition_groups.items():
+                if cond["type"] == "missionsweit" and cond["effect_target"] == f"Fertigkeit: {skill}":
+                    total_modifier += cond["effect_value"]
+                    affecting.append(f"{cond_name} ({cond['effect_value']:+})")
+
+            modified_val = base_val + total_modifier
+
+            for category, skills_dict in self.skill_inputs.items():
+                if skill in skills_dict:
+                    field = skills_dict[skill]
+                    field.blockSignals(True)
+                    field.setText(str(modified_val))
+                    field.blockSignals(False)
+                    if affecting:
+                        field.setStyleSheet("color: darkgreen; font-weight: bold;")
+                        tooltip = " | ".join(affecting)
+                        field.setToolTip(f"Modifiziert durch: {tooltip}")
+                    else:
+                        field.setStyleSheet("")
+                        field.setToolTip("")
+                    break
+
+        # ✨ NEU: nach allen Modifikationen Endwert-Labels updaten
+        self.update_endwert_labels()
+
+    def update_endwert_labels(self):
+        """
+        Aktualisiert alle Endwert-Labels für alle Fertigkeiten basierend auf:
+        - aktuellem (ggf. modifiziertem) Skill-Wert im Eingabefeld
+        - aktuellem (ggf. modifiziertem) Kategoriewert-Label
+        """
+        for category in self.skills:
+            # aktuellen (ggf. modifizierten) Kategoriewert aus dem Label parsen
+            # Label sieht jetzt z.B. so aus:
+            #   "Handeln-Wert: 5"
+            # oder nach Mod: 
+            #   "Handeln-Wert: 3 (Mod: Fieber (-2))"
+            cat_label_text = self.category_labels[category].text()
+            # wir holen die erste Zahl nach dem Doppelpunkt
+            try:
+                cat_current_value_str = cat_label_text.split(":")[1].strip().split(" ")[0]
+                cat_current_value = int(cat_current_value_str)
+            except Exception:
+                cat_current_value = 0
+
+            # jetzt alle Skills dieser Kategorie anfassen
+            for skill, input_field in self.skill_inputs[category].items():
+                # aktueller (ggf. modifizierter) Skillwert aus dem Feld
+                try:
+                    skill_val = int(input_field.text()) if input_field.text() else 0
+                except ValueError:
+                    skill_val = 0
+
+                # Endwert = Skillwert + Kategoriewert
+                final_val = skill_val + cat_current_value
+
+                # zum passenden Endwert-Label schreiben
+                if category in self.skill_end_labels and skill in self.skill_end_labels[category]:
+                    self.skill_end_labels[category][skill].setText(f"Endwert: {final_val}")
+
 
 
     def update_base_hitpoints(self):
@@ -665,6 +798,7 @@ class CharacterCreationDialog(QDialog):
 
         # Nach dem Laden missionsweite Effekte anwenden
         self.apply_mission_effects()
+        self.apply_all_mission_effects()
 
 
         self.update_points()
