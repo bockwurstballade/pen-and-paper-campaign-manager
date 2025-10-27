@@ -127,6 +127,17 @@ class CharacterCreationDialog(QDialog):
         self.items_group.setLayout(self.items_layout)
         main_layout.addWidget(self.items_group)
 
+        # Zustände
+        self.conditions_group = QGroupBox("Zustände")
+        self.conditions_layout = QVBoxLayout()
+        self.condition_groups = {}
+        self.condition_add_button = QPushButton("+ Neuer Zustand")
+        self.condition_add_button.clicked.connect(self.add_condition)
+        self.conditions_layout.addWidget(self.condition_add_button)
+        self.conditions_group.setLayout(self.conditions_layout)
+        main_layout.addWidget(self.conditions_group)
+
+
         # Speichern-Button
         save_button = QPushButton("Charakter speichern")
         save_button.clicked.connect(self.save_character)
@@ -254,6 +265,48 @@ class CharacterCreationDialog(QDialog):
             del self.item_groups[item_name]
             QMessageBox.information(self, "Erfolg", f"Item '{item_name}' wurde entfernt.")
 
+    def add_condition(self):
+        """Erstellt einen neuen Zustand mit Name und Beschreibung."""
+        name, ok = QInputDialog.getText(self, "Neuer Zustand", "Name des Zustands:")
+        if not ok or not name.strip():
+            QMessageBox.warning(self, "Fehler", "Name darf nicht leer sein.")
+            return
+        name = name.strip()
+        if name in self.condition_groups:
+            QMessageBox.warning(self, "Fehler", f"Zustand '{name}' existiert bereits.")
+            return
+
+        # Beschreibung abfragen
+        desc, ok = QInputDialog.getMultiLineText(self, "Zustandsbeschreibung", f"Beschreibung für '{name}':")
+        if not ok:
+            return
+
+        # Gruppe für den Zustand
+        group = QGroupBox(name)
+        layout = QVBoxLayout()
+        desc_label = QLabel(desc)
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        remove_button = QPushButton("– Zustand entfernen")
+        remove_button.clicked.connect(lambda _, cond=name: self.remove_condition(cond))
+        layout.addWidget(remove_button)
+
+        group.setLayout(layout)
+        self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
+
+        # Intern speichern
+        self.condition_groups[name] = {"description": desc, "group": group}
+
+    def remove_condition(self, condition_name):
+        """Entfernt einen Zustand aus der Liste."""
+        if condition_name in self.condition_groups:
+            group = self.condition_groups[condition_name]["group"]
+            self.conditions_layout.removeWidget(group)
+            group.deleteLater()
+            del self.condition_groups[condition_name]
+            QMessageBox.information(self, "Erfolg", f"Zustand '{condition_name}' wurde entfernt.")
+
     def update_points(self):
         try:
             total_used = 0
@@ -331,7 +384,13 @@ class CharacterCreationDialog(QDialog):
                 inspiration_points[category] = kaufmaennisch_runden(category_scores[category] / 10)
             if total_used > 400:
                 raise ValueError("Gesamtpunkte überschreiten 400!")
+            # Items sammeln
             items_data = {item_name: data["attributes"] for item_name, data in self.item_groups.items()}
+            # Zustände sammeln
+            conditions_data = {
+                name: data["description"]
+                for name, data in self.condition_groups.items()
+            }
         except ValueError as e:
             QMessageBox.warning(self, "Fehler", str(e) if str(e) != "" else "Bitte gültige Zahlen eingeben.")
             return
@@ -350,7 +409,8 @@ class CharacterCreationDialog(QDialog):
             "skills": skills_data,
             "category_scores": category_scores,
             "inspiration_points": inspiration_points,
-            "items": items_data
+            "items": items_data,
+            "conditions": conditions_data
         }
 
         if self.loaded_file:
@@ -422,6 +482,22 @@ class CharacterCreationDialog(QDialog):
             self.items_layout.insertWidget(self.items_layout.count() - 1, item_group)
             self.item_groups[item_name]["layout"] = item_layout
             self.item_groups[item_name]["group"] = item_group
+        # Zustände wiederherstellen
+        for cond_name, cond_desc in character.get("conditions", {}).items():
+            group = QGroupBox(cond_name)
+            layout = QVBoxLayout()
+            desc_label = QLabel(cond_desc)
+            desc_label.setWordWrap(True)
+            layout.addWidget(desc_label)
+
+            remove_button = QPushButton("– Zustand entfernen")
+            remove_button.clicked.connect(lambda _, cond=cond_name: self.remove_condition(cond))
+            layout.addWidget(remove_button)
+
+            group.setLayout(layout)
+            self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
+
+            self.condition_groups[cond_name] = {"description": cond_desc, "group": group}
 
         self.update_points()
 
