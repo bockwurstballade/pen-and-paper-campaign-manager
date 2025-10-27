@@ -266,7 +266,7 @@ class CharacterCreationDialog(QDialog):
             QMessageBox.information(self, "Erfolg", f"Item '{item_name}' wurde entfernt.")
 
     def add_condition(self):
-        """Erstellt einen neuen Zustand mit Name und Beschreibung."""
+        """Erstellt einen neuen Zustand mit optionaler Auswirkung (missionsweit, rundenbasiert oder keine)."""
         name, ok = QInputDialog.getText(self, "Neuer Zustand", "Name des Zustands:")
         if not ok or not name.strip():
             QMessageBox.warning(self, "Fehler", "Name darf nicht leer sein.")
@@ -276,17 +276,89 @@ class CharacterCreationDialog(QDialog):
             QMessageBox.warning(self, "Fehler", f"Zustand '{name}' existiert bereits.")
             return
 
-        # Beschreibung abfragen
-        desc, ok = QInputDialog.getMultiLineText(self, "Zustandsbeschreibung", f"Beschreibung für '{name}':")
+        # Beschreibung
+        desc, ok = QInputDialog.getMultiLineText(
+            self,
+            "Zustandsbeschreibung",
+            f"Beschreibung für '{name}':"
+        )
         if not ok:
             return
 
-        # Gruppe für den Zustand
+        # Typ abfragen (mit 'keine Auswirkung')
+        effect_type, ok = QInputDialog.getItem(
+            self,
+            "Auswirkungstyp wählen",
+            "Hat der Zustand eine regeltechnische Auswirkung?",
+            ["keine Auswirkung", "missionsweit", "rundenbasiert"],
+            0,
+            False,
+        )
+        if not ok:
+            effect_type = "keine Auswirkung"
+
+        effect_target = ""
+        effect_value = 0
+
+        # Nur wenn missionsweit / rundenbasiert → Ziel + Wert abfragen
+        if effect_type in ("missionsweit", "rundenbasiert"):
+            # mögliche Ziele aufbauen
+            possible_targets = ["Lebenspunkte"]
+
+            # alle Fertigkeiten
+            for cat, skills in self.skills.items():
+                for skill in skills:
+                    possible_targets.append(f"Fertigkeit: {skill}")
+
+            # Kategorien (Kategorie-Wert + Geistesblitzpunkte)
+            for cat in self.skills.keys():
+                possible_targets.append(f"Kategoriewert: {cat}")
+                possible_targets.append(f"Geistesblitzpunkte: {cat}")
+
+            target, ok = QInputDialog.getItem(
+                self,
+                "Ziel der Auswirkung",
+                "Auf welches Attribut wirkt sich der Zustand aus?",
+                possible_targets,
+                0,
+                False,
+            )
+            if not ok:
+                target = "Lebenspunkte"
+
+            effect_target = target
+
+            # Effektwert (+10, -20, etc.)
+            value_str, ok = QInputDialog.getText(
+                self,
+                "Wert der Auswirkung",
+                "Wert (z. B. +15 oder -20):"
+            )
+            if not ok or not value_str.strip():
+                value_str = "0"
+            try:
+                effect_value = int(value_str)
+            except ValueError:
+                QMessageBox.warning(self, "Fehler", "Bitte eine ganze Zahl angeben (z. B. -10 oder +5).")
+                return
+
+        # GUI-Block für den Zustand bauen
         group = QGroupBox(name)
         layout = QVBoxLayout()
+
         desc_label = QLabel(desc)
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
+
+        # Nur anzeigen, wenn es wirklich eine Auswirkung gibt
+        if effect_type != "keine Auswirkung":
+            effect_label = QLabel(
+                f"{effect_type.capitalize()}e Wirkung: "
+                f"{effect_target} "
+                f"{'+' if effect_value >= 0 else ''}{effect_value}"
+            )
+            effect_label.setStyleSheet("color: #555; font-style: italic;")
+            layout.addWidget(effect_label)
 
         remove_button = QPushButton("– Zustand entfernen")
         remove_button.clicked.connect(lambda _, cond=name: self.remove_condition(cond))
@@ -295,8 +367,20 @@ class CharacterCreationDialog(QDialog):
         group.setLayout(layout)
         self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
 
-        # Intern speichern
-        self.condition_groups[name] = {"description": desc, "group": group}
+        # Zustand intern speichern
+        self.condition_groups[name] = {
+            "description": desc,
+            "type": effect_type,            # "keine Auswirkung" | "missionsweit" | "rundenbasiert"
+            "effect_target": effect_target, # "" falls keine
+            "effect_value": effect_value,   # 0 falls keine
+            "group": group,
+        }
+
+        # missionsweite Effekte sofort anwenden
+        if effect_type == "missionsweit":
+            self.apply_mission_effects()
+
+
 
     def remove_condition(self, condition_name):
         """Entfernt einen Zustand aus der Liste."""
@@ -306,6 +390,9 @@ class CharacterCreationDialog(QDialog):
             group.deleteLater()
             del self.condition_groups[condition_name]
             QMessageBox.information(self, "Erfolg", f"Zustand '{condition_name}' wurde entfernt.")
+        # Falls missionsweite Effekte betroffen sind → aktualisieren
+        self.apply_mission_effects()
+
 
     def update_points(self):
         try:
@@ -349,6 +436,33 @@ class CharacterCreationDialog(QDialog):
         except ValueError as e:
             QMessageBox.warning(self, "Fehler", str(e))
 
+    def apply_mission_effects(self):
+        """Aktualisiert alle missionsweiten Effekte auf den Charakterwerten."""
+        # Lebenspunkte-Basiswert
+        try:
+            base_hp = int(self.hitpoints_input.text()) if self.hitpoints_input.text() else 0
+        except ValueError:
+            base_hp = 0
+
+        total_hp_modifier = 0
+        affecting_conditions = []
+
+        # alle Zustände durchgehen
+        for cond_name, cond in self.condition_groups.items():
+            if cond["type"] == "missionsweit" and cond["effect_target"] == "Lebenspunkte":
+                total_hp_modifier += cond["effect_value"]
+                affecting_conditions.append(f"{cond_name} ({cond['effect_value']:+})")
+
+        # neuen Text setzen
+        modified_hp = base_hp + total_hp_modifier
+        if affecting_conditions:
+            self.hitpoints_input.setStyleSheet("color: red; font-weight: bold;")
+            self.hitpoints_input.setText(str(modified_hp))
+            tooltip = " | ".join(affecting_conditions)
+            self.hitpoints_input.setToolTip(f"Modifiziert durch: {tooltip}")
+        else:
+            self.hitpoints_input.setStyleSheet("")
+
 
     def save_character(self):
         try:
@@ -388,9 +502,15 @@ class CharacterCreationDialog(QDialog):
             items_data = {item_name: data["attributes"] for item_name, data in self.item_groups.items()}
             # Zustände sammeln
             conditions_data = {
-                name: data["description"]
+                name: {
+                    "description": data["description"],
+                    "type": data.get("type", "missionsweit"),
+                    "effect_target": data.get("effect_target", ""),
+                    "effect_value": data.get("effect_value", 0),
+                }
                 for name, data in self.condition_groups.items()
             }
+
         except ValueError as e:
             QMessageBox.warning(self, "Fehler", str(e) if str(e) != "" else "Bitte gültige Zahlen eingeben.")
             return
@@ -483,12 +603,35 @@ class CharacterCreationDialog(QDialog):
             self.item_groups[item_name]["layout"] = item_layout
             self.item_groups[item_name]["group"] = item_group
         # Zustände wiederherstellen
-        for cond_name, cond_desc in character.get("conditions", {}).items():
+        for cond_name, cond_data in character.get("conditions", {}).items():
+            # Abwärtskompatibilität zu alten Saves (reiner Text)
+            if isinstance(cond_data, str):
+                cond_data = {
+                    "description": cond_data,
+                    "type": "keine Auswirkung",
+                    "effect_target": "",
+                    "effect_value": 0,
+                }
+
             group = QGroupBox(cond_name)
             layout = QVBoxLayout()
-            desc_label = QLabel(cond_desc)
+
+            desc_label = QLabel(cond_data.get("description", ""))
             desc_label.setWordWrap(True)
             layout.addWidget(desc_label)
+
+            cond_type = cond_data.get("type", "keine Auswirkung")
+            cond_target = cond_data.get("effect_target", "")
+            cond_value = cond_data.get("effect_value", 0)
+
+            if cond_type != "keine Auswirkung" and cond_target:
+                effect_label = QLabel(
+                    f"{cond_type.capitalize()}e Wirkung: "
+                    f"{cond_target} "
+                    f"{cond_value:+}"
+                )
+                effect_label.setStyleSheet("color: #555; font-style: italic;")
+                layout.addWidget(effect_label)
 
             remove_button = QPushButton("– Zustand entfernen")
             remove_button.clicked.connect(lambda _, cond=cond_name: self.remove_condition(cond))
@@ -497,7 +640,17 @@ class CharacterCreationDialog(QDialog):
             group.setLayout(layout)
             self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
 
-            self.condition_groups[cond_name] = {"description": cond_desc, "group": group}
+            self.condition_groups[cond_name] = {
+                "description": cond_data.get("description", ""),
+                "type": cond_type,
+                "effect_target": cond_target,
+                "effect_value": cond_value,
+                "group": group,
+            }
+
+        # Nach dem Laden missionsweite Effekte anwenden
+        self.apply_mission_effects()
+
 
         self.update_points()
 
