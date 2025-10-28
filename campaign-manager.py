@@ -388,33 +388,28 @@ class ItemEditorDialog(QDialog):
 
 
 class ConditionEditorDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, available_skill_targets=None,
+                 available_category_targets=None,
+                 available_inspiration_targets=None):
         super().__init__(parent)
 
         self.setWindowTitle("Zustand bearbeiten / erstellen")
         self.setGeometry(250, 250, 450, 400)
 
-        self.loaded_file = None      # in welcher Datei liegt der Zustand
-        self.condition_id = None     # UUID
+        self.loaded_file = None
+        self.condition_id = None
 
-        # Wichtig: wir brauchen mögliche Ziele (Attribut-Auswahl).
-        # Da dieser Dialog jetzt unabhängig vom Charakter ist, kennen wir evtl. (noch) nicht alle Skills des aktuellen Chars.
-        # Lösung: Wir pflegen nur die Struktur, DU kannst die Liste später dynamisch erweitern.
-        # Wir starten mit Basiswerten; Skills/Kategorien lassen wir erstmal leer oder als freie Eingabe.
-        # Später können wir das andocken an den Charakter, aber nicht jetzt.
-        self.available_skill_targets = []          # z.B. ["Fertigkeit: Laufen", ...]
-        self.available_category_targets = []       # z.B. ["Kategoriewert: Handeln", ...]
-        self.available_inspiration_targets = []    # z.B. ["Geistesblitzpunkte: Wissen", ...]
-        # Für jetzt machen wir die Auswahlliste so, dass der User freie Texte ergänzen kann, falls noch nicht vorhanden.
+        # Falls nichts übergeben wurde: leere Listen
+        self.available_skill_targets = available_skill_targets or []
+        self.available_category_targets = available_category_targets or []
+        self.available_inspiration_targets = available_inspiration_targets or []
 
         main_layout = QVBoxLayout()
 
-        # Formular-Basisfelder
         form_layout = QFormLayout()
         self.name_input = QLineEdit()
         self.description_input = QLineEdit()
 
-        # Auswirkungstyp
         self.effect_type_input = QComboBox()
         self.effect_type_input.addItems([
             "keine Auswirkung",
@@ -422,13 +417,9 @@ class ConditionEditorDialog(QDialog):
             "rundenbasiert"
         ])
 
-        # Zielattribut der Auswirkung
-        # → wir erlauben entweder vorausgewählte Standard-Targets
-        #   oder einen eigenen Eintrag ("Benutzerdefiniert ...")
         self.effect_target_input = QComboBox()
         self.rebuild_effect_target_options()
 
-        # Wert (Bonus/Malus)
         self.effect_value_input = QLineEdit()
         self.effect_value_input.setPlaceholderText("z. B. -20 oder +15")
 
@@ -440,7 +431,6 @@ class ConditionEditorDialog(QDialog):
 
         main_layout.addLayout(form_layout)
 
-        # Speichern-Button
         save_button = QPushButton("Zustand speichern")
         save_button.clicked.connect(self.save_condition)
         main_layout.addWidget(save_button)
@@ -449,31 +439,24 @@ class ConditionEditorDialog(QDialog):
         self.setLayout(main_layout)
 
     def rebuild_effect_target_options(self):
-        """
-        Baut die Auswahlliste für das Ziel der Auswirkung neu auf.
-        Hier sind die 'Standard' Attribute drin. Du kannst später dynamisch
-        Dinge wie Skills oder Kategorien ergänzen.
-        """
         current = self.effect_target_input.currentText() if hasattr(self, "effect_target_input") else ""
 
-        targets = ["(kein Ziel / n/a)",
-                   "Lebenspunkte"]
+        targets = ["(kein Ziel / n/a)", "Lebenspunkte"]
 
-        # dynamische Listen dranhängen
-        targets.extend(self.available_skill_targets)           # "Fertigkeit: Laufen"
-        targets.extend(self.available_category_targets)        # "Kategoriewert: Handeln"
-        targets.extend(self.available_inspiration_targets)     # "Geistesblitzpunkte: Wissen"
+        targets.extend(self.available_skill_targets)
+        targets.extend(self.available_category_targets)
+        targets.extend(self.available_inspiration_targets)
 
-        # Option für freie Eingabe
         targets.append("Benutzerdefiniert ...")
+
+        print("DEBUG targets im Dialog:", targets)
 
         self.effect_target_input.clear()
         self.effect_target_input.addItems(targets)
 
-        # Versuch, alten Wert wiederzusetzen
         if current in targets:
-            idx = targets.index(current)
-            self.effect_target_input.setCurrentIndex(idx)
+            self.effect_target_input.setCurrentText(current)
+
 
     def ask_for_custom_target_if_needed(self):
         """
@@ -695,27 +678,27 @@ class CharacterCreationDialog(QDialog):
 
         for category in self.skills:
             self.group_boxes[category] = QGroupBox(category)
-
-            # Style hinzufügen:
             self.style_groupbox(self.group_boxes[category])
 
             self.form_layouts[category] = QFormLayout()
             self.skill_inputs[category] = {}
-            self.group_boxes[category].setLayout(QVBoxLayout())
-            self.group_boxes[category].layout().addLayout(self.form_layouts[category])
-            self.group_boxes[category] = QGroupBox(category)
-            self.form_layouts[category] = QFormLayout()
-            self.skill_inputs[category] = {}
-            self.group_boxes[category].setLayout(QVBoxLayout())
-            self.group_boxes[category].layout().addLayout(self.form_layouts[category])
+
+            vbox = QVBoxLayout()
+            vbox.addLayout(self.form_layouts[category])
+
             self.add_buttons[category] = QPushButton("+ Neue Fähigkeit")
             self.add_buttons[category].clicked.connect(lambda _, cat=category: self.add_skill(cat))
-            self.group_boxes[category].layout().addWidget(self.add_buttons[category])
+            vbox.addWidget(self.add_buttons[category])
+
+            self.group_boxes[category].setLayout(vbox)
+
             main_layout.addWidget(self.group_boxes[category])
+
             self.category_labels[category] = QLabel(f"{category}-Wert: 0")
             self.inspiration_labels[category] = QLabel(f"Geistesblitzpunkte ({category}): 0")
             main_layout.addWidget(self.category_labels[category])
             main_layout.addWidget(self.inspiration_labels[category])
+
 
         main_layout.addWidget(self.total_points_label)
 
@@ -780,6 +763,49 @@ class CharacterCreationDialog(QDialog):
         main_layout.addWidget(save_button)
 
         main_layout.addStretch()
+
+    def _is_condition_target_valid_for_this_character(self, effect_target: str) -> bool:
+        """
+        Prüft, ob ein effect_target wie
+        - "Lebenspunkte"
+        - "Fertigkeit: Schleichen"
+        - "Kategoriewert: Handeln"
+        - "Geistesblitzpunkte: Wissen"
+        in diesem Charakter tatsächlich existiert.
+
+        Gibt True zurück, wenn der Zustand sinnvoll angewendet werden kann.
+        """
+        if not effect_target or effect_target == "(kein Ziel / n/a)":
+            return True  # dann gibt's eh keinen Effekt, also nix zu validieren
+
+        # 1) Lebenspunkte ist immer okay
+        if effect_target == "Lebenspunkte":
+            return True
+
+        # 2) Fertigkeit: <name>
+        if effect_target.startswith("Fertigkeit: "):
+            skill_name = effect_target.replace("Fertigkeit: ", "", 1).strip()
+            # checkt, ob der Char diese Fertigkeit überhaupt hat
+            for cat, skill_list in self.skills.items():
+                if skill_name in skill_list:
+                    return True
+            return False
+
+        # 3) Kategoriewert: <cat>
+        if effect_target.startswith("Kategoriewert: "):
+            cat_name = effect_target.replace("Kategoriewert: ", "", 1).strip()
+            # Kategorienamen sind unsere keys in self.skills (Handeln/Wissen/Soziales/…)
+            return cat_name in self.skills
+
+        # 4) Geistesblitzpunkte: <cat>
+        if effect_target.startswith("Geistesblitzpunkte: "):
+            cat_name = effect_target.replace("Geistesblitzpunkte: ", "", 1).strip()
+            return cat_name in self.skills
+
+        # 5) Wenn es ein komplett freies/custom Ziel ist (Benutzerdefiniert ... oder etwas Exotisches),
+        #    dann können wir nicht prüfen → wir lassen es als gültig durchgehen.
+        return True
+
 
     def style_groupbox(self, box: QGroupBox):
         box.setStyleSheet("""
@@ -1067,35 +1093,51 @@ class CharacterCreationDialog(QDialog):
 
         layout = QVBoxLayout()
 
+        # Beschreibung
         desc_label = QLabel(desc)
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
+        # Effektzeile (falls einer existiert)
         if effect_type != "keine Auswirkung" and effect_target:
-            effect_label = QLabel(
-                f"{effect_type.capitalize()}e Wirkung: "
-                f"{effect_target} "
-                f"{effect_value:+}"
-            )
-            effect_label.setStyleSheet("color: #555; font-style: italic;")
-            layout.addWidget(effect_label)
+            # Prüfen, ob dieses Target für DIESEN Charakter überhaupt Sinn ergibt
+            target_ok = self._is_condition_target_valid_for_this_character(effect_target)
 
-        # Hinweis, falls Zustand aktuell nur durch ein Item aktiv ist
+            if target_ok:
+                # normaler Stil
+                effect_label = QLabel(
+                    f"{effect_type.capitalize()}e Wirkung: "
+                    f"{effect_target} "
+                    f"{effect_value:+}"
+                )
+                effect_label.setStyleSheet("color: #555; font-style: italic;")
+                layout.addWidget(effect_label)
+            else:
+                # WARNUNG: dieser Zustand will etwas modifizieren,
+                # das der Charakter gar nicht hat
+                effect_label = QLabel(
+                    f"{effect_type.capitalize()}e Wirkung: "
+                    f"{effect_target} {effect_value:+}  (⚠ nicht vorhanden bei diesem Charakter)"
+                )
+                effect_label.setStyleSheet("color: #b00; font-weight: bold;")
+                layout.addWidget(effect_label)
+
+                warn_label = QLabel(
+                    "Hinweis: Dieser Zustand verweist auf einen Wert, "
+                    "den dieser Charakter aktuell nicht besitzt."
+                )
+                warn_label.setWordWrap(True)
+                warn_label.setStyleSheet("color: #b00; font-size: 10px;")
+                layout.addWidget(warn_label)
+
+        # Falls der Zustand aus einem Item kommt, Info anzeigen
         if source_item:
             src_label = QLabel(f"Aktiv durch Item: {source_item}")
             src_label.setStyleSheet("color: #888; font-size: 10px;")
             layout.addWidget(src_label)
 
-        # Entfernen-Button NUR für manuelle Zustände.
-        # Zustände, die über Items kommen, sollen NICHT direkt hier gelöscht werden,
-        # sondern nur verschwinden, wenn das Item entfernt wird.
-        # Wir unterscheiden über: steckt der cid bereits in condition_groups via add_condition()?
-        is_manual = False
-        for manual_name, manual_data in self.condition_groups.items():
-            # manuell gepflegte Zustände haben keine UUID, also wir vergleichen nicht per ID.
-            # simpler Plan: wenn dieser cid dort vorkommt nicht? -> wir sagen: nur manuelle bekommen Entfernen.
-            # Wir machen's andersrum: falls es KEIN source_item gibt, ist es manuell.
-            pass
+        # Entfernen-Button nur für manuell aktivierte Zustände (also ohne source_item).
+        # Item-Zustände verschwinden nur, wenn das Item entfernt wird.
         if source_item is None:
             remove_button = QPushButton("– Zustand entfernen")
             remove_button.clicked.connect(lambda _, cond_id=cid: self.manual_remove_condition_by_id(cond_id))
@@ -1103,14 +1145,20 @@ class CharacterCreationDialog(QDialog):
 
         group.setLayout(layout)
 
-        # wir speichern das QGroupBox Widget auch irgendwo, damit wir es gezielt löschen können
-        self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
+        # Gruppe VOR den Buttons einfügen (Buttons sind am Ende des Layouts)
+        # self.conditions_layout enthält:
+        #   [ "+ Neuer Zustand", ... , "+ Zustand aus Sammlung hinzufügen" ]
+        # Wir wollen den Block davor reinschieben.
+        insert_pos = max(0, self.conditions_layout.count() - 2)
+        self.conditions_layout.insertWidget(insert_pos, group)
 
-        # aktive Darstellung merken, damit wir sie später sauber wegräumen können
-        # wir erweitern active_condition_by_id Einträge (wenn noch nicht gesetzt)
+        # Widget-Metadaten in active_condition_by_id speichern (für späteres Entfernen usw.)
         temp = self.active_condition_by_id.get(cid, {})
         temp["_widget"] = group
-        self.active_condition_by_id[cid] = temp | cond_data  # kleines Merge
+        # Merge dicts
+        merged = {**cond_data, **temp}
+        self.active_condition_by_id[cid] = merged
+
 
     def remove_item_and_detach_conditions(self, item_name):
         """
@@ -1146,6 +1194,7 @@ class CharacterCreationDialog(QDialog):
 
         QMessageBox.information(self, "Erfolg", f"Item '{item_name}' wurde entfernt.")
 
+
     def remove_condition_widget_by_id(self, cid):
         """
         Entfernt die UI-Darstellung eines Zustands (falls sichtbar) und vergisst ihn in active_condition_by_id.
@@ -1164,106 +1213,74 @@ class CharacterCreationDialog(QDialog):
         self.active_condition_by_id.pop(cid, None)
 
     def add_condition(self):
-        """Erstellt einen neuen Zustand (manuell) und aktiviert ihn direkt am Charakter."""
-        name, ok = QInputDialog.getText(self, "Neuer Zustand", "Name des Zustands:")
-        if not ok or not name.strip():
-            QMessageBox.warning(self, "Fehler", "Name darf nicht leer sein.")
-            return
-        name = name.strip()
+        # baue die möglichen Ziele aus DIESEM Charakter
+        skill_targets, cat_targets, insp_targets = self._build_condition_target_lists()
 
-        # Beschreibung
-        desc, ok = QInputDialog.getMultiLineText(
-            self,
-            "Zustandsbeschreibung",
-            f"Beschreibung für '{name}':"
+        dlg = ConditionEditorDialog(
+            parent=self,
+            available_skill_targets=skill_targets,
+            available_category_targets=cat_targets,
+            available_inspiration_targets=insp_targets
         )
-        if not ok:
-            return
+        dlg.condition_id = str(uuid.uuid4())  # direkt neue UUID vergeben
+        result = dlg.exec()
+        if result != QDialog.DialogCode.Accepted:
+            return  # Abbruch -> nix tun
 
-        # Typ abfragen (mit 'keine Auswirkung')
-        effect_type, ok = QInputDialog.getItem(
-            self,
-            "Auswirkungstyp wählen",
-            "Hat der Zustand eine regeltechnische Auswirkung?",
-            ["keine Auswirkung", "missionsweit", "rundenbasiert"],
-            0,
-            False,
-        )
-        if not ok:
-            effect_type = "keine Auswirkung"
+        # Zustand wurde gespeichert → wir müssen ihn in den Charakter aktivieren
+        # und ins UI holen
 
-        effect_target = ""
-        effect_value = 0
-
-        if effect_type in ("missionsweit", "rundenbasiert"):
-            possible_targets = ["Lebenspunkte"]
-
-            for cat, skills in self.skills.items():
-                for skill in skills:
-                    possible_targets.append(f"Fertigkeit: {skill}")
-
-            for cat in self.skills.keys():
-                possible_targets.append(f"Kategoriewert: {cat}")
-                possible_targets.append(f"Geistesblitzpunkte: {cat}")
-
-            target, ok = QInputDialog.getItem(
-                self,
-                "Ziel der Auswirkung",
-                "Auf welches Attribut wirkt sich der Zustand aus?",
-                possible_targets,
-                0,
-                False,
-            )
-            if not ok:
-                target = "Lebenspunkte"
-            effect_target = target
-
-            value_str, ok = QInputDialog.getText(
-                self,
-                "Wert der Auswirkung",
-                "Wert (z. B. +15 oder -20):"
-            )
-            if not ok or not value_str.strip():
-                value_str = "0"
+        # Schritt 1: conditions.json neu einlesen und den gespeicherten Zustand finden
+        if os.path.exists("conditions.json"):
             try:
-                effect_value = int(value_str)
-            except ValueError:
-                QMessageBox.warning(self, "Fehler", "Bitte eine ganze Zahl angeben (z. B. -10 oder +5).")
-                return
+                with open("conditions.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    cond_list = data.get("conditions", [])
+            except Exception:
+                cond_list = []
+        else:
+            cond_list = []
 
-        # eigene UUID für diesen manuellen Zustand
-        cid = str(uuid.uuid4())
+        # Wir suchen den Zustand per ID, die der Dialog gesetzt hat
+        saved_cond = None
+        for c in cond_list:
+            if c.get("id") == dlg.condition_id:
+                saved_cond = c
+                break
 
-        cond_data = {
-            "id": cid,
-            "name": name,
-            "description": desc,
-            "effect_type": effect_type,
-            "effect_target": effect_target,
-            "effect_value": effect_value,
-        }
+        # Falls wir ihn nicht finden, ist was schief – dann bauen wir ihn eben aus Dialogfeldern rekonstruiert neu
+        if not saved_cond:
+            saved_cond = {
+                "id": dlg.condition_id,
+                "name": dlg.name_input.text().strip(),
+                "description": dlg.description_input.text().strip(),
+                "effect_type": dlg.effect_type_input.currentText(),
+                "effect_target": dlg.ask_for_custom_target_if_needed(),  # finaler target string
+                "effect_value": int(dlg.effect_value_input.text() or "0")
+            }
 
-        # Refcount setzen
+        cid = saved_cond["id"]
+
+        # Refcount erhöhen
         self.condition_refcount[cid] = self.condition_refcount.get(cid, 0) + 1
 
-        # speichern in active_condition_by_id + widget zeichnen
-        self.active_condition_by_id[cid] = cond_data
-        self.render_condition_block_from_condition_data(cid, cond_data, source_item=None)
-
-        # auch in condition_groups für save_character() (damit alte Save-Logik weiter funktioniert)
-        self.condition_groups[name] = {
-            "description": desc,
-            "type": effect_type,
-            "effect_target": effect_target,
-            "effect_value": effect_value,
-            "group": self.active_condition_by_id[cid]["_widget"],
+        # In unsere aktiven Zustände aufnehmen (falls nicht schon da)
+        already_active = cid in self.active_condition_by_id
+        self.active_condition_by_id[cid] = {
             "id": cid,
+            "name": saved_cond.get("name", ""),
+            "description": saved_cond.get("description", ""),
+            "effect_type": saved_cond.get("effect_type", "keine Auswirkung"),
+            "effect_target": saved_cond.get("effect_target", ""),
+            "effect_value": saved_cond.get("effect_value", 0),
+            # _widget füllen wir gleich beim rendern, falls nötig
         }
 
-        # Effekte anwenden
+        if not already_active:
+            self.render_condition_block_from_condition_data(cid, self.active_condition_by_id[cid], source_item=None)
+
+        # Effekte neu anwenden
         self.recalculate_conditions_effects()
-
-
 
     def remove_condition(self, condition_name):
         """Entfernt einen Zustand aus der Liste."""
@@ -1276,6 +1293,23 @@ class CharacterCreationDialog(QDialog):
         # Falls missionsweite Effekte betroffen sind → aktualisieren
         self.apply_mission_effects()
         self.apply_all_mission_effects()
+
+    def _build_condition_target_lists(self):
+        skill_targets = []
+        category_targets = []
+        insp_targets = []
+
+        for cat, skill_list in self.skills.items():
+            # Skills
+            for skill in skill_list:
+                skill_targets.append(f"Fertigkeit: {skill}")
+
+            # Kategorien immer eintragen:
+            category_targets.append(f"Kategoriewert: {cat}")
+            insp_targets.append(f"Geistesblitzpunkte: {cat}")
+
+        return skill_targets, category_targets, insp_targets
+
 
     def manual_remove_condition_by_id(self, cid):
         """
@@ -1921,6 +1955,55 @@ class WelcomeWindow(QMainWindow):
         layout.addStretch()
 
 
+    def _collect_all_condition_targets_from_all_characters(self):
+        """
+        Sammelt aus allen gespeicherten Charakteren:
+        - alle Fertigkeiten
+        - alle Kategorien (Handeln / Wissen / Soziales / ...)
+        - alle Geistesblitzpunkte-Kategorien
+
+        Liefert Tupel (skill_targets, category_targets, inspiration_targets)
+        so wie CharacterCreationDialog._build_condition_target_lists,
+        nur eben über ALLE Chars gemergt.
+        """
+        skill_set = set()
+        category_set = set()
+
+        characters_dir = "characters"
+        if os.path.isdir(characters_dir):
+            for fname in os.listdir(characters_dir):
+                if not fname.lower().endswith(".json"):
+                    continue
+                full_path = os.path.join(characters_dir, fname)
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    continue  # kaputte Datei ignorieren
+
+                # skills ist wie:
+                # {
+                #   "Handeln": {"Schleichen": 35, "Klettern": 20},
+                #   "Wissen": {...},
+                #   "Soziales": {...}
+                # }
+                skills_block = data.get("skills", {})
+                for category_name, skills_dict in skills_block.items():
+                    # Kategorie merken
+                    category_set.add(category_name)
+
+                    # Skills merken
+                    for skill_name in skills_dict.keys():
+                        skill_set.add(skill_name)
+
+        # Jetzt Listen im passenden Format bauen
+        skill_targets = [f"Fertigkeit: {skill}" for skill in sorted(skill_set)]
+        category_targets = [f"Kategoriewert: {cat}" for cat in sorted(category_set)]
+        inspiration_targets = [f"Geistesblitzpunkte: {cat}" for cat in sorted(category_set)]
+
+        return skill_targets, category_targets, inspiration_targets
+
+
     def start_character_creation(self):
         dialog = CharacterCreationDialog(self)
         dialog.char_id = str(uuid.uuid4())  # neue frische ID vergeben
@@ -2040,9 +2123,19 @@ class WelcomeWindow(QMainWindow):
 
     def create_new_condition(self):
         """Öffnet den Zustands-Editor leer zum Erstellen eines neuen Zustands."""
-        dlg = ConditionEditorDialog(self)
+
+        # Sammle alle sinnvollen Ziele aus ALLEN gespeicherten Charakteren
+        skill_targets, cat_targets, insp_targets = self._collect_all_condition_targets_from_all_characters()
+
+        dlg = ConditionEditorDialog(
+            parent=self,
+            available_skill_targets=skill_targets,
+            available_category_targets=cat_targets,
+            available_inspiration_targets=insp_targets
+        )
         dlg.condition_id = str(uuid.uuid4())  # direkt frische UUID vergeben
         dlg.exec()
+
 
     def load_condition(self):
         """Lädt eine conditions.json (oder andere Datei), lässt den Nutzer einen Zustand wählen und öffnet ihn im Editor."""
