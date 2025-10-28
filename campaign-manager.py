@@ -1,10 +1,11 @@
 import sys
 import json
 import os
+import uuid
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog
+    QInputDialog, QHBoxLayout, QFileDialog, QScrollArea
 )
 
 from PyQt6.QtCore import Qt
@@ -13,6 +14,575 @@ from decimal import Decimal, ROUND_HALF_UP
 def kaufmaennisch_runden(x):
     """Rundet nach kaufmännischer Regel: ab 0.5 wird aufgerundet."""
     return int(Decimal(str(round(x, 3))).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+class ItemEditorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Item bearbeiten / erstellen")
+        self.setGeometry(200, 200, 400, 500)
+
+        # wenn wir ein bestehendes Item laden, merken wir uns die Quelle
+        self.loaded_file = None
+        self.item_id = None  # UUID des Items
+
+        # internes Attribut-Storage: {attr_name: {...}}
+        self.attributes_inputs = {}
+
+        # Zustände, die diesem Item zugeordnet sind (Liste von Condition-UUIDs)
+        self.linked_conditions = []
+
+        main_layout = QVBoxLayout()
+
+        # Basisdaten
+        form_layout = QFormLayout()
+        self.name_input = QLineEdit()
+        self.description_input = QLineEdit()
+        form_layout.addRow("Name:", self.name_input)
+        form_layout.addRow("Beschreibung:", self.description_input)
+        main_layout.addLayout(form_layout)
+
+        # Attribute-Bereich
+        self.attr_group = QGroupBox("Attribute")
+        self.attr_layout_outer = QVBoxLayout()
+        self.attr_form_layout = QFormLayout()
+        self.attr_layout_outer.addLayout(self.attr_form_layout)
+
+        self.add_attr_button = QPushButton("+ Neues Attribut")
+        self.add_attr_button.clicked.connect(lambda: self.add_attribute_row())
+        self.attr_layout_outer.addWidget(self.add_attr_button)
+
+        self.attr_group.setLayout(self.attr_layout_outer)
+        main_layout.addWidget(self.attr_group)
+
+        # Zustände-Bereich
+        self.conditions_group = QGroupBox("Verknüpfte Zustände")
+        self.conditions_layout = QVBoxLayout()
+
+        self.conditions_list_label = QLabel("Keine Zustände verknüpft.")
+        self.conditions_layout.addWidget(self.conditions_list_label)
+
+        # Buttons: bestehenden Zustand verknüpfen / neuen Zustand erstellen
+        cond_button_row = QHBoxLayout()
+        self.add_existing_condition_button = QPushButton("+ Bestehenden Zustand verknüpfen")
+        self.add_existing_condition_button.clicked.connect(self.add_existing_condition)
+
+        self.create_new_condition_button = QPushButton("+ Neuen Zustand erstellen")
+        self.create_new_condition_button.clicked.connect(self.create_new_condition_from_item)
+
+        cond_button_row.addWidget(self.add_existing_condition_button)
+        cond_button_row.addWidget(self.create_new_condition_button)
+        self.conditions_layout.addLayout(cond_button_row)
+
+        # Entfernen-Button
+        self.remove_condition_button = QPushButton("– Zustand entfernen")
+        self.remove_condition_button.clicked.connect(self.remove_linked_condition)
+        self.conditions_layout.addWidget(self.remove_condition_button)
+
+        self.conditions_group.setLayout(self.conditions_layout)
+        main_layout.addWidget(self.conditions_group)
+
+        # Speichern-Button
+        save_button = QPushButton("Item speichern")
+        save_button.clicked.connect(self.save_item)
+        main_layout.addWidget(save_button)
+
+        main_layout.addStretch()
+        self.setLayout(main_layout)
+
+    def add_attribute_row(self, preset_name=None, preset_value=None):
+        """
+        Fügt eine neue Attribut-Zeile hinzu: [Label attr_name:] [Wertfeld] [Entfernen-Button]
+        preset_* wird beim Laden existierender Items benutzt.
+        Beim manuellen Anlegen via Button fragen wir interaktiv nach Name und Wert.
+        """
+
+        # 1. Attribut-Name bestimmen
+        if preset_name is None:
+            attr_name, ok = QInputDialog.getText(self, "Neues Attribut", "Attribut-Name:")
+            if not ok:
+                return  # User hat abgebrochen -> einfach nix tun
+            attr_name = attr_name.strip()
+            if not attr_name:
+                QMessageBox.warning(self, "Fehler", "Attribut-Name darf nicht leer sein.")
+                return
+            if attr_name in self.attributes_inputs:
+                QMessageBox.warning(self, "Fehler", f"Attribut '{attr_name}' existiert bereits.")
+                return
+        else:
+            attr_name = str(preset_name)
+
+        # 2. Attribut-Wert bestimmen
+        if preset_value is None:
+            attr_value, ok = QInputDialog.getText(self, "Neues Attribut", f"Wert für '{attr_name}':")
+            if not ok:
+                return  # User hat abgebrochen -> gar nicht erst anlegen
+            attr_value = attr_value.strip()
+        else:
+            attr_value = str(preset_value)
+
+        # 3. GUI-Zeile bauen
+        value_field = QLineEdit(attr_value)
+        remove_button = QPushButton("– Entfernen")
+
+        row_layout = QHBoxLayout()
+        name_label = QLabel(attr_name + ":")
+        row_layout.addWidget(name_label)
+        row_layout.addWidget(value_field)
+        row_layout.addWidget(remove_button)
+
+        placeholder_label = QLabel("")  # linker Slot fürs QFormLayout
+        self.attr_form_layout.addRow(placeholder_label, row_layout)
+
+        # 4. intern speichern
+        self.attributes_inputs[attr_name] = {
+            "field": value_field,
+            "row_layout": row_layout,
+            "name_label": name_label,
+            "placeholder_label": placeholder_label,
+        }
+
+        # 5. Entfernen-Button verdrahten
+        remove_button.clicked.connect(lambda _, key=attr_name: self.remove_attribute_row(key))
+
+    def remove_attribute_row(self, attr_name):
+        if attr_name not in self.attributes_inputs:
+            return
+
+        entry = self.attributes_inputs[attr_name]
+        row_layout = entry["row_layout"]
+
+        # Die richtige Zeile im FormLayout finden
+        for i in range(self.attr_form_layout.rowCount()):
+            label_item = self.attr_form_layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
+            field_item = self.attr_form_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
+
+            if field_item is not None:
+                layout_obj = field_item.layout()
+                if layout_obj is row_layout:
+                    # alle Widgets/Layers in row_layout zerstören
+                    while row_layout.count():
+                        child_item = row_layout.takeAt(0)
+                        if child_item.widget():
+                            child_item.widget().deleteLater()
+                        elif child_item.layout():
+                            inner = child_item.layout()
+                            while inner.count():
+                                inner_child = inner.takeAt(0)
+                                if inner_child.widget():
+                                    inner_child.widget().deleteLater()
+
+                    # Placeholder-Label entfernen
+                    if label_item and label_item.widget():
+                        label_item.widget().deleteLater()
+
+                    self.attr_form_layout.removeRow(i)
+                    break
+
+        del self.attributes_inputs[attr_name]
+
+    def update_condition_display(self):
+        """Aktualisiert die Anzeige der verknüpften Zustände im Item-Dialog."""
+        if not self.linked_conditions:
+            self.conditions_list_label.setText("Keine Zustände verknüpft.")
+            return
+
+        # conditions.json lesen, um Namen zuzuordnen
+        cond_map = {}
+        if os.path.exists("conditions.json"):
+            try:
+                with open("conditions.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    cond_map = {c["id"]: c for c in data.get("conditions", [])}
+            except Exception:
+                pass
+
+        lines = []
+        for cid in self.linked_conditions:
+            cond = cond_map.get(cid)
+            if cond:
+                lines.append(f"{cond.get('name', '(unbenannt)')} ({cid[:8]}...)")
+            else:
+                lines.append(f"[Fehlend] {cid[:8]}...")
+
+        self.conditions_list_label.setText("\n".join(lines))
+
+    def add_existing_condition(self):
+        """Lässt den Nutzer einen bestehenden Zustand aus conditions.json auswählen und verknüpft ihn."""
+        if not os.path.exists("conditions.json"):
+            QMessageBox.warning(self, "Fehler", "Keine conditions.json gefunden.")
+            return
+
+        with open("conditions.json", "r", encoding="utf-8") as f:
+            data = json.load(f)
+            conditions = data.get("conditions", [])
+
+        if not conditions:
+            QMessageBox.information(self, "Hinweis", "Es sind keine Zustände vorhanden.")
+            return
+
+        cond_names = [f"{c.get('name', '(unbenannt)')} [{c.get('id', '?')}]" for c in conditions]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Zustand auswählen",
+            "Welchen Zustand möchtest du verknüpfen?",
+            cond_names,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        idx = cond_names.index(choice)
+        selected = conditions[idx]
+        cid = selected.get("id")
+
+        if cid in self.linked_conditions:
+            QMessageBox.information(self, "Hinweis", "Dieser Zustand ist bereits verknüpft.")
+            return
+
+        self.linked_conditions.append(cid)
+        self.update_condition_display()
+
+    def create_new_condition_from_item(self):
+        """Erstellt einen neuen Zustand und verknüpft ihn direkt mit diesem Item."""
+        dlg = ConditionEditorDialog(self)
+        dlg.condition_id = str(uuid.uuid4())
+        dlg.exec()
+
+        # Versuchen, den zuletzt gespeicherten Zustand aus conditions.json zu verknüpfen
+        if os.path.exists("conditions.json"):
+            try:
+                with open("conditions.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if "conditions" in data and data["conditions"]:
+                        latest = data["conditions"][-1]  # heuristik: letzter Eintrag = zuletzt gespeichert
+                        cid = latest.get("id")
+                        if cid and cid not in self.linked_conditions:
+                            self.linked_conditions.append(cid)
+            except Exception as e:
+                QMessageBox.warning(self, "Fehler", f"Konnte neuen Zustand nicht verknüpfen:\n{e}")
+
+        self.update_condition_display()
+
+    def remove_linked_condition(self):
+        """Ermöglicht, eine bestehende Verknüpfung zu entfernen."""
+        if not self.linked_conditions:
+            QMessageBox.information(self, "Hinweis", "Dieses Item hat keine verknüpften Zustände.")
+            return
+
+        # Namen zu IDs auflösen, damit der User nicht nur UUIDs sieht
+        cond_map = {}
+        if os.path.exists("conditions.json"):
+            try:
+                with open("conditions.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    cond_map = {c["id"]: c for c in data.get("conditions", [])}
+            except Exception:
+                pass
+
+        cond_choices = [
+            cond_map[cid]["name"] if cid in cond_map else f"[Fehlend] {cid[:8]}..."
+            for cid in self.linked_conditions
+        ]
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Zustand entfernen",
+            "Welchen Zustand möchtest du entfernen?",
+            cond_choices,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        idx = cond_choices.index(choice)
+        cid_to_remove = self.linked_conditions[idx]
+        self.linked_conditions.remove(cid_to_remove)
+        self.update_condition_display()
+
+    def load_item_data(self, item_data, file_path):
+        """
+        Lädt bestehendes Item in den Dialog, damit es bearbeitet werden kann.
+        item_data ist ein einzelnes Item-Dict (mit 'id', 'name', ...)
+        """
+        self.loaded_file = file_path
+        self.item_id = item_data.get("id", str(uuid.uuid4()))
+
+        self.name_input.setText(item_data.get("name", ""))
+        self.description_input.setText(item_data.get("description", ""))
+
+        # Zustände / Links laden
+        self.linked_conditions = item_data.get("linked_conditions", [])
+        self.update_condition_display()
+
+        # Attribute rendern
+        attrs = item_data.get("attributes", {})
+        for attr_name, attr_value in attrs.items():
+            self.add_attribute_row(preset_name=attr_name, preset_value=attr_value)
+
+    def save_item(self):
+        """
+        Speichert/aktualisiert das Item in der items.json.
+        - Wenn self.loaded_file gesetzt -> in diese Datei schreiben.
+        - Sonst: neue Datei anlegen bzw. bestehende items.json im Arbeitsordner erweitern.
+        """
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Fehler", "Name darf nicht leer sein.")
+            return
+
+        description = self.description_input.text().strip()
+
+        # Attribute einsammeln
+        attributes = {}
+        for attr_name, data in self.attributes_inputs.items():
+            value_field = data["field"]
+            attributes[attr_name] = value_field.text().strip()
+
+        # UUID vergeben/festhalten
+        if not self.item_id:
+            self.item_id = str(uuid.uuid4())
+
+        item_obj = {
+            "id": self.item_id,
+            "name": name,
+            "description": description,
+            "attributes": attributes,
+            "linked_conditions": self.linked_conditions
+        }
+
+        # Dateipfad bestimmen
+        target_file = self.loaded_file if self.loaded_file else "items.json"
+
+        # Bestehende Items laden (wenn Datei existiert)
+        items_list = []
+        if os.path.exists(target_file):
+            try:
+                with open(target_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
+                        items_list = data["items"]
+            except Exception:
+                # wenn Datei kaputt ist -> starten wir leer
+                pass
+
+        # Prüfen, ob Item schon in der Liste ist -> dann ersetzen wir es
+        replaced = False
+        for idx, existing in enumerate(items_list):
+            if existing.get("id") == self.item_id:
+                items_list[idx] = item_obj
+                replaced = True
+                break
+
+        if not replaced:
+            items_list.append(item_obj)
+
+        # Zurückschreiben
+        with open(target_file, "w", encoding="utf-8") as f:
+            json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
+
+        QMessageBox.information(self, "Erfolg", f"Item '{name}' wurde gespeichert!")
+        self.accept()
+
+
+class ConditionEditorDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Zustand bearbeiten / erstellen")
+        self.setGeometry(250, 250, 450, 400)
+
+        self.loaded_file = None      # in welcher Datei liegt der Zustand
+        self.condition_id = None     # UUID
+
+        # Wichtig: wir brauchen mögliche Ziele (Attribut-Auswahl).
+        # Da dieser Dialog jetzt unabhängig vom Charakter ist, kennen wir evtl. (noch) nicht alle Skills des aktuellen Chars.
+        # Lösung: Wir pflegen nur die Struktur, DU kannst die Liste später dynamisch erweitern.
+        # Wir starten mit Basiswerten; Skills/Kategorien lassen wir erstmal leer oder als freie Eingabe.
+        # Später können wir das andocken an den Charakter, aber nicht jetzt.
+        self.available_skill_targets = []          # z.B. ["Fertigkeit: Laufen", ...]
+        self.available_category_targets = []       # z.B. ["Kategoriewert: Handeln", ...]
+        self.available_inspiration_targets = []    # z.B. ["Geistesblitzpunkte: Wissen", ...]
+        # Für jetzt machen wir die Auswahlliste so, dass der User freie Texte ergänzen kann, falls noch nicht vorhanden.
+
+        main_layout = QVBoxLayout()
+
+        # Formular-Basisfelder
+        form_layout = QFormLayout()
+        self.name_input = QLineEdit()
+        self.description_input = QLineEdit()
+
+        # Auswirkungstyp
+        self.effect_type_input = QComboBox()
+        self.effect_type_input.addItems([
+            "keine Auswirkung",
+            "missionsweit",
+            "rundenbasiert"
+        ])
+
+        # Zielattribut der Auswirkung
+        # → wir erlauben entweder vorausgewählte Standard-Targets
+        #   oder einen eigenen Eintrag ("Benutzerdefiniert ...")
+        self.effect_target_input = QComboBox()
+        self.rebuild_effect_target_options()
+
+        # Wert (Bonus/Malus)
+        self.effect_value_input = QLineEdit()
+        self.effect_value_input.setPlaceholderText("z. B. -20 oder +15")
+
+        form_layout.addRow("Name:", self.name_input)
+        form_layout.addRow("Beschreibung:", self.description_input)
+        form_layout.addRow("Auswirkungstyp:", self.effect_type_input)
+        form_layout.addRow("Ziel der Auswirkung:", self.effect_target_input)
+        form_layout.addRow("Modifikator:", self.effect_value_input)
+
+        main_layout.addLayout(form_layout)
+
+        # Speichern-Button
+        save_button = QPushButton("Zustand speichern")
+        save_button.clicked.connect(self.save_condition)
+        main_layout.addWidget(save_button)
+
+        main_layout.addStretch()
+        self.setLayout(main_layout)
+
+    def rebuild_effect_target_options(self):
+        """
+        Baut die Auswahlliste für das Ziel der Auswirkung neu auf.
+        Hier sind die 'Standard' Attribute drin. Du kannst später dynamisch
+        Dinge wie Skills oder Kategorien ergänzen.
+        """
+        current = self.effect_target_input.currentText() if hasattr(self, "effect_target_input") else ""
+
+        targets = ["(kein Ziel / n/a)",
+                   "Lebenspunkte"]
+
+        # dynamische Listen dranhängen
+        targets.extend(self.available_skill_targets)           # "Fertigkeit: Laufen"
+        targets.extend(self.available_category_targets)        # "Kategoriewert: Handeln"
+        targets.extend(self.available_inspiration_targets)     # "Geistesblitzpunkte: Wissen"
+
+        # Option für freie Eingabe
+        targets.append("Benutzerdefiniert ...")
+
+        self.effect_target_input.clear()
+        self.effect_target_input.addItems(targets)
+
+        # Versuch, alten Wert wiederzusetzen
+        if current in targets:
+            idx = targets.index(current)
+            self.effect_target_input.setCurrentIndex(idx)
+
+    def ask_for_custom_target_if_needed(self):
+        """
+        Wenn der User 'Benutzerdefiniert ...' gewählt hat, fragen wir ihn nach freiem Text.
+        Gibt den finalen target-String zurück.
+        """
+        choice = self.effect_target_input.currentText()
+        if choice == "Benutzerdefiniert ...":
+            custom_text, ok = QInputDialog.getText(self, "Eigenes Ziel", "Auf welches Attribut wirkt sich der Zustand aus?")
+            if not ok:
+                return "(kein Ziel / n/a)"
+            return custom_text.strip() if custom_text.strip() else "(kein Ziel / n/a)"
+        return choice
+
+    def load_condition_data(self, cond_data, file_path):
+        """
+        Lädt einen bestehenden Zustand in den Dialog.
+        cond_data ist ein einzelnes Zustands-Dict (mit id, name, ...)
+        """
+        self.loaded_file = file_path
+        self.condition_id = cond_data.get("id", str(uuid.uuid4()))
+
+        self.name_input.setText(cond_data.get("name", ""))
+        self.description_input.setText(cond_data.get("description", ""))
+
+        effect_type = cond_data.get("effect_type", "keine Auswirkung")
+        if effect_type not in ["keine Auswirkung", "missionsweit", "rundenbasiert"]:
+            effect_type = "keine Auswirkung"
+        self.effect_type_input.setCurrentText(effect_type)
+
+        # Ziel nutzen (falls nicht in Liste, hängen wir es temporär rein)
+        target_loaded = cond_data.get("effect_target", "(kein Ziel / n/a)")
+        self.rebuild_effect_target_options()
+        if target_loaded and target_loaded not in [self.effect_target_input.itemText(i) for i in range(self.effect_target_input.count())]:
+            self.effect_target_input.addItem(target_loaded)
+        self.effect_target_input.setCurrentText(target_loaded)
+
+        self.effect_value_input.setText(str(cond_data.get("effect_value", 0)))
+
+    def save_condition(self):
+        """
+        Speichert/aktualisiert den Zustand in conditions.json.
+        """
+        name = self.name_input.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Fehler", "Name darf nicht leer sein.")
+            return
+
+        description = self.description_input.text().strip()
+
+        effect_type = self.effect_type_input.currentText()
+
+        # Zielattribut holen (ggf. custom abfragen)
+        target = self.ask_for_custom_target_if_needed()
+
+        # Wert parse-int (falls leer -> 0)
+        value_str = self.effect_value_input.text().strip()
+        if value_str == "":
+            effect_value = 0
+        else:
+            try:
+                effect_value = int(value_str)
+            except ValueError:
+                QMessageBox.warning(self, "Fehler", "Der Modifikator muss eine ganze Zahl sein (z. B. -10 oder +5).")
+                return
+
+        # UUID setzen/festhalten
+        if not self.condition_id:
+            self.condition_id = str(uuid.uuid4())
+
+        cond_obj = {
+            "id": self.condition_id,
+            "name": name,
+            "description": description,
+            "effect_type": effect_type,
+            "effect_target": target if effect_type != "keine Auswirkung" else "",
+            "effect_value": effect_value if effect_type != "keine Auswirkung" else 0
+        }
+
+        target_file = self.loaded_file if self.loaded_file else "conditions.json"
+
+        # existierende Datei laden
+        cond_list = []
+        if os.path.exists(target_file):
+            try:
+                with open(target_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict) and "conditions" in data and isinstance(data["conditions"], list):
+                        cond_list = data["conditions"]
+            except Exception:
+                pass
+
+        # Zustand einfügen / ersetzen
+        replaced = False
+        for i, existing in enumerate(cond_list):
+            if existing.get("id") == self.condition_id:
+                cond_list[i] = cond_obj
+                replaced = True
+                break
+        if not replaced:
+            cond_list.append(cond_obj)
+
+        # zurückschreiben
+        with open(target_file, "w", encoding="utf-8") as f:
+            json.dump({"conditions": cond_list}, f, indent=4, ensure_ascii=False)
+
+        QMessageBox.information(self, "Erfolg", f"Zustand '{name}' wurde gespeichert!")
+        self.accept()
+
 
 class AttributeDialog(QDialog):
     def __init__(self, parent=None):
@@ -49,14 +619,34 @@ class AttributeDialog(QDialog):
 class CharacterCreationDialog(QDialog):
 
     def __init__(self, parent=None):
-        self.loaded_file = None  # Wird gesetzt, wenn Charakter geladen wurde
+        self.loaded_file = None
 
         super().__init__(parent)
         self.setWindowTitle("Neuen Charakter erstellen")
-        self.setGeometry(150, 150, 450, 700)
+        self.setGeometry(150, 150, 500, 700)
 
-        # Hauptlayout
-        main_layout = QVBoxLayout()
+        # ---------- SCROLL WRAPPER ----------
+        # Das äußere Layout gehört dem Dialog selbst
+        outer_layout = QVBoxLayout(self)
+
+        # ScrollArea, in der der eigentliche Content wohnt
+        self.scroll_area = QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+
+        # Widget innerhalb der ScrollArea
+        self.scroll_widget = QWidget()
+        self.scroll_area.setWidget(self.scroll_widget)
+
+        # Das echte Content-Layout (das früher main_layout war)
+        content_layout = QVBoxLayout(self.scroll_widget)
+
+        # ScrollArea ins äußere Layout einhängen
+        outer_layout.addWidget(self.scroll_area)
+
+        # Ab hier benutzen wir main_layout so wie vorher
+        main_layout = content_layout
+        # ---------- /SCROLL WRAPPER ----------
+
 
         # Basisdaten-Formular
         self.base_form = QFormLayout()
@@ -103,6 +693,15 @@ class CharacterCreationDialog(QDialog):
 
         for category in self.skills:
             self.group_boxes[category] = QGroupBox(category)
+
+            # Style hinzufügen:
+            self.style_groupbox(self.group_boxes[category])
+
+            self.form_layouts[category] = QFormLayout()
+            self.skill_inputs[category] = {}
+            self.group_boxes[category].setLayout(QVBoxLayout())
+            self.group_boxes[category].layout().addLayout(self.form_layouts[category])
+            self.group_boxes[category] = QGroupBox(category)
             self.form_layouts[category] = QFormLayout()
             self.skill_inputs[category] = {}
             self.group_boxes[category].setLayout(QVBoxLayout())
@@ -120,25 +719,49 @@ class CharacterCreationDialog(QDialog):
 
         # Items
         self.items_group = QGroupBox("Items")
+        self.style_groupbox(self.items_group)
         self.items_layout = QVBoxLayout()
         self.item_groups = {}
         self.item_add_button = QPushButton("+ Neues Item")
         self.item_add_button.clicked.connect(self.add_item)
         self.items_layout.addWidget(self.item_add_button)
+        self.item_add_from_lib_button = QPushButton("+ Item aus Sammlung hinzufügen")
+        self.item_add_from_lib_button.clicked.connect(self.add_item_from_library)
+        self.items_layout.addWidget(self.item_add_from_lib_button)
         self.items_group.setLayout(self.items_layout)
         main_layout.addWidget(self.items_group)
 
         # Zustände
         self.conditions_group = QGroupBox("Zustände")
+        self.style_groupbox(self.conditions_group)
         self.conditions_layout = QVBoxLayout()
         self.condition_groups = {}
+        # Zustände von Items
+        # mappt item_name -> liste von condition_ids (UUIDs)
+        self.item_condition_links = {}
+
+        # mappt condition_id -> dict mit den vollen Zustandsdaten
+        # so wie sie aus conditions.json kommen oder ad hoc gebaut wurden
+        self.active_condition_by_id = {}
+
+        # wir brauchen außerdem einen Counter, um Zustände, die von mehreren Items kommen, nicht doppelt zu entfernen
+        # mappt condition_id -> wie viele Quellen (Items oder manuell) diesen Zustand "aktiv" halten
+        self.condition_refcount = {}
         self.condition_add_button = QPushButton("+ Neuer Zustand")
         self.condition_add_button.clicked.connect(self.add_condition)
         self.conditions_layout.addWidget(self.condition_add_button)
         self.conditions_group.setLayout(self.conditions_layout)
+        self.condition_add_from_lib_button = QPushButton("+ Zustand aus Sammlung hinzufügen")
+        self.condition_add_from_lib_button.clicked.connect(self.add_condition_from_library)
+        self.conditions_layout.addWidget(self.condition_add_from_lib_button)
         main_layout.addWidget(self.conditions_group)
 
+
+
         self.base_hitpoints = 0
+
+
+
 
 
         self.base_values = {
@@ -155,7 +778,24 @@ class CharacterCreationDialog(QDialog):
         main_layout.addWidget(save_button)
 
         main_layout.addStretch()
-        self.setLayout(main_layout)
+
+    def style_groupbox(self, box: QGroupBox):
+        box.setStyleSheet("""
+            QGroupBox {
+                margin-top: 8px;
+                padding: 8px;
+                border: 1px solid #444;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0px 4px;
+                color: #ddd;
+                font-weight: bold;
+            }
+        """)
 
     def add_skill(self, category):
         skill_name, ok = QInputDialog.getText(self, f"Neue Fähigkeit für {category}", "Fähigkeitsname:")
@@ -237,6 +877,9 @@ class CharacterCreationDialog(QDialog):
             return
 
         item_group = QGroupBox(item_name)
+        item_group = QGroupBox(item_name)
+        self.style_groupbox(item_group)
+
         item_layout = QVBoxLayout()
         self.item_groups[item_name] = {"attributes": {}, "layout": item_layout, "group": item_group}
         
@@ -276,16 +919,255 @@ class CharacterCreationDialog(QDialog):
             del self.item_groups[item_name]
             QMessageBox.information(self, "Erfolg", f"Item '{item_name}' wurde entfernt.")
 
+    def add_item_from_library(self):
+        """Fügt dem Charakter ein Item aus items.json hinzu und aktiviert dessen Zustände."""
+        # 1. Items-Datei lesen
+        if not os.path.exists("items.json"):
+            QMessageBox.warning(self, "Fehler", "Keine items.json gefunden.")
+            return
+
+        try:
+            with open("items.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                items_list = data.get("items", [])
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden von items.json:\n{e}")
+            return
+
+        if not items_list:
+            QMessageBox.information(self, "Hinweis", "Es sind keine Items in items.json vorhanden.")
+            return
+
+        # 2. Item auswählen lassen
+        item_choices = [f"{it.get('name','(unbenannt)')} [{it.get('id','?')}]" for it in items_list]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Item auswählen",
+            "Welches Item soll hinzugefügt werden?",
+            item_choices,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        idx = item_choices.index(choice)
+        chosen_item = items_list[idx]
+
+        item_name = chosen_item.get("name", "Unbenanntes Item")
+        item_id = chosen_item.get("id", str(uuid.uuid4()))
+        attributes = chosen_item.get("attributes", {})
+        linked_conditions = chosen_item.get("linked_conditions", [])
+
+        # 3. Prüfen, ob Item mit gleichem Namen schon existiert
+        if item_name in self.item_groups:
+            QMessageBox.warning(self, "Fehler", f"Item '{item_name}' existiert bereits im Inventar.")
+            return
+
+        # 4. Item-UI Block erstellen wie in add_item(), aber vorbefüllt
+        item_group = QGroupBox(item_name)
+        item_group = QGroupBox(item_name)
+        self.style_groupbox(item_group)
+
+        item_layout = QVBoxLayout()
+        self.item_groups[item_name] = {
+            "attributes": {},
+            "layout": item_layout,
+            "group": item_group,
+            "id": item_id,
+            "linked_conditions": linked_conditions
+        }
+
+        attr_layout = QFormLayout()
+        # Attribute aus dem gespeicherten Item hinzufügen
+        for attr_name, attr_value in attributes.items():
+            attr_layout.addRow(f"{attr_name}:", QLabel(str(attr_value)))
+            self.item_groups[item_name]["attributes"][attr_name] = attr_value
+
+        add_attr_button = QPushButton("+ Neue Eigenschaft")
+        add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
+        item_layout.addLayout(attr_layout)
+        item_layout.addWidget(add_attr_button)
+
+        remove_button = QPushButton("- Item entfernen")
+        remove_button.clicked.connect(lambda _, item=item_name: self.remove_item_and_detach_conditions(item))
+        item_layout.addWidget(remove_button)
+
+        item_group.setLayout(item_layout)
+        self.items_layout.insertWidget(self.items_layout.count() - 2, item_group)
+        # ^ wir -2 einfügen statt -1, weil wir jetzt 2 Buttons (Neues Item / Aus Sammlung) am Ende haben
+
+        # 5. Zustände aus diesem Item aktivieren
+        self.item_condition_links[item_name] = linked_conditions
+        self.attach_item_conditions(item_name, linked_conditions)
+
+    def attach_item_conditions(self, item_name, condition_ids):
+        """
+        Nimmt die Zustands-UUIDs eines Items, schaut in conditions.json nach,
+        und sorgt dafür, dass diese Zustände im Charakter sichtbar/aktiv sind.
+        Falls ein Zustand schon da ist (z.B. durch ein anderes Item), erhöhen wir nur den Refcount.
+        """
+        # conditions.json laden -> Map von ID -> Zustand
+        cond_map = {}
+        if os.path.exists("conditions.json"):
+            try:
+                with open("conditions.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    cond_map = {c["id"]: c for c in data.get("conditions", [])}
+            except Exception:
+                pass
+
+        for cid in condition_ids:
+            cond_data = cond_map.get(cid)
+            if not cond_data:
+                # Zustand ungekannt? -> wir hängen trotzdem nen Platzhalter ein, aber ohne Wirkung
+                cond_data = {
+                    "id": cid,
+                    "name": f"(Unbekannter Zustand {cid[:8]}...)",
+                    "description": "Originalzustand nicht gefunden.",
+                    "effect_type": "keine Auswirkung",
+                    "effect_target": "",
+                    "effect_value": 0
+                }
+
+            # Refcount erhöhen
+            self.condition_refcount[cid] = self.condition_refcount.get(cid, 0) + 1
+
+            # Wenn Zustand schon im UI ist, nicht doppelt zeichnen
+            if cid in self.active_condition_by_id:
+                continue
+
+            # Zustand im UI darstellen
+            self.render_condition_block_from_condition_data(cid, cond_data, source_item=item_name)
+
+            # merken
+            self.active_condition_by_id[cid] = cond_data
+
+        # Effekte neu anwenden (falls missionsweit etc.)
+        self.recalculate_conditions_effects()
+
+    def render_condition_block_from_condition_data(self, cid, cond_data, source_item=None):
+        """
+        Zeichnet einen Zustand in die Zustands-UI (self.conditions_layout),
+        basierend auf einem cond_data-Dict im Format aus conditions.json.
+        cid = eindeutige Zustands-ID (UUID)
+        source_item = optionaler Item-Name, das diesen Zustand liefert
+        """
+
+        cond_name = cond_data.get("name", f"Zustand {cid[:8]}")
+        desc = cond_data.get("description", "")
+        effect_type = cond_data.get("effect_type", "keine Auswirkung")
+        effect_target = cond_data.get("effect_target", "")
+        effect_value = cond_data.get("effect_value", 0)
+
+        group = QGroupBox(cond_name)
+        self.style_groupbox(group)
+
+        layout = QVBoxLayout()
+
+        desc_label = QLabel(desc)
+        desc_label.setWordWrap(True)
+        layout.addWidget(desc_label)
+
+        if effect_type != "keine Auswirkung" and effect_target:
+            effect_label = QLabel(
+                f"{effect_type.capitalize()}e Wirkung: "
+                f"{effect_target} "
+                f"{effect_value:+}"
+            )
+            effect_label.setStyleSheet("color: #555; font-style: italic;")
+            layout.addWidget(effect_label)
+
+        # Hinweis, falls Zustand aktuell nur durch ein Item aktiv ist
+        if source_item:
+            src_label = QLabel(f"Aktiv durch Item: {source_item}")
+            src_label.setStyleSheet("color: #888; font-size: 10px;")
+            layout.addWidget(src_label)
+
+        # Entfernen-Button NUR für manuelle Zustände.
+        # Zustände, die über Items kommen, sollen NICHT direkt hier gelöscht werden,
+        # sondern nur verschwinden, wenn das Item entfernt wird.
+        # Wir unterscheiden über: steckt der cid bereits in condition_groups via add_condition()?
+        is_manual = False
+        for manual_name, manual_data in self.condition_groups.items():
+            # manuell gepflegte Zustände haben keine UUID, also wir vergleichen nicht per ID.
+            # simpler Plan: wenn dieser cid dort vorkommt nicht? -> wir sagen: nur manuelle bekommen Entfernen.
+            # Wir machen's andersrum: falls es KEIN source_item gibt, ist es manuell.
+            pass
+        if source_item is None:
+            remove_button = QPushButton("– Zustand entfernen")
+            remove_button.clicked.connect(lambda _, cond_id=cid: self.manual_remove_condition_by_id(cond_id))
+            layout.addWidget(remove_button)
+
+        group.setLayout(layout)
+
+        # wir speichern das QGroupBox Widget auch irgendwo, damit wir es gezielt löschen können
+        self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
+
+        # aktive Darstellung merken, damit wir sie später sauber wegräumen können
+        # wir erweitern active_condition_by_id Einträge (wenn noch nicht gesetzt)
+        temp = self.active_condition_by_id.get(cid, {})
+        temp["_widget"] = group
+        self.active_condition_by_id[cid] = temp | cond_data  # kleines Merge
+
+    def remove_item_and_detach_conditions(self, item_name):
+        """
+        Entfernt ein Item aus dem Charakterinventar und reduziert die Refcounts
+        der damit verknüpften Zustände.
+        Zustände, die dadurch auf 0 fallen, verschwinden wieder aus der UI.
+        """
+        if item_name not in self.item_groups:
+            return
+
+        # 1. Zustands-Links dieses Items holen
+        linked_conds = self.item_groups[item_name].get("linked_conditions", [])
+        for cid in linked_conds:
+            if cid in self.condition_refcount:
+                self.condition_refcount[cid] -= 1
+                if self.condition_refcount[cid] <= 0:
+                    # komplett entfernen
+                    self.condition_refcount.pop(cid, None)
+                    self.remove_condition_widget_by_id(cid)
+
+        # 2. Item-UI entfernen
+        item_group = self.item_groups[item_name]["group"]
+        self.items_layout.removeWidget(item_group)
+        item_group.deleteLater()
+        del self.item_groups[item_name]
+
+        # 3. auch den Link aus item_condition_links löschen
+        if item_name in self.item_condition_links:
+            del self.item_condition_links[item_name]
+
+        # 4. Effekte neu anwenden
+        self.recalculate_conditions_effects()
+
+        QMessageBox.information(self, "Erfolg", f"Item '{item_name}' wurde entfernt.")
+
+    def remove_condition_widget_by_id(self, cid):
+        """
+        Entfernt die UI-Darstellung eines Zustands (falls sichtbar) und vergisst ihn in active_condition_by_id.
+        Achtung: das betrifft NUR Zustände, die über Items gekommen sind ODER manuell entfernt wurden.
+        """
+        cond_info = self.active_condition_by_id.get(cid)
+        if not cond_info:
+            return
+
+        widget = cond_info.get("_widget")
+        if widget:
+            self.conditions_layout.removeWidget(widget)
+            widget.deleteLater()
+
+        # aus Tracking entfernen
+        self.active_condition_by_id.pop(cid, None)
+
     def add_condition(self):
-        """Erstellt einen neuen Zustand mit optionaler Auswirkung (missionsweit, rundenbasiert oder keine)."""
+        """Erstellt einen neuen Zustand (manuell) und aktiviert ihn direkt am Charakter."""
         name, ok = QInputDialog.getText(self, "Neuer Zustand", "Name des Zustands:")
         if not ok or not name.strip():
             QMessageBox.warning(self, "Fehler", "Name darf nicht leer sein.")
             return
         name = name.strip()
-        if name in self.condition_groups:
-            QMessageBox.warning(self, "Fehler", f"Zustand '{name}' existiert bereits.")
-            return
 
         # Beschreibung
         desc, ok = QInputDialog.getMultiLineText(
@@ -311,17 +1193,13 @@ class CharacterCreationDialog(QDialog):
         effect_target = ""
         effect_value = 0
 
-        # Nur wenn missionsweit / rundenbasiert → Ziel + Wert abfragen
         if effect_type in ("missionsweit", "rundenbasiert"):
-            # mögliche Ziele aufbauen
             possible_targets = ["Lebenspunkte"]
 
-            # alle Fertigkeiten
             for cat, skills in self.skills.items():
                 for skill in skills:
                     possible_targets.append(f"Fertigkeit: {skill}")
 
-            # Kategorien (Kategorie-Wert + Geistesblitzpunkte)
             for cat in self.skills.keys():
                 possible_targets.append(f"Kategoriewert: {cat}")
                 possible_targets.append(f"Geistesblitzpunkte: {cat}")
@@ -336,10 +1214,8 @@ class CharacterCreationDialog(QDialog):
             )
             if not ok:
                 target = "Lebenspunkte"
-
             effect_target = target
 
-            # Effektwert (+10, -20, etc.)
             value_str, ok = QInputDialog.getText(
                 self,
                 "Wert der Auswirkung",
@@ -353,44 +1229,37 @@ class CharacterCreationDialog(QDialog):
                 QMessageBox.warning(self, "Fehler", "Bitte eine ganze Zahl angeben (z. B. -10 oder +5).")
                 return
 
-        # GUI-Block für den Zustand bauen
-        group = QGroupBox(name)
-        layout = QVBoxLayout()
+        # eigene UUID für diesen manuellen Zustand
+        cid = str(uuid.uuid4())
 
-        desc_label = QLabel(desc)
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
-
-        # Nur anzeigen, wenn es wirklich eine Auswirkung gibt
-        if effect_type != "keine Auswirkung":
-            effect_label = QLabel(
-                f"{effect_type.capitalize()}e Wirkung: "
-                f"{effect_target} "
-                f"{'+' if effect_value >= 0 else ''}{effect_value}"
-            )
-            effect_label.setStyleSheet("color: #555; font-style: italic;")
-            layout.addWidget(effect_label)
-
-        remove_button = QPushButton("– Zustand entfernen")
-        remove_button.clicked.connect(lambda _, cond=name: self.remove_condition(cond))
-        layout.addWidget(remove_button)
-
-        group.setLayout(layout)
-        self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
-
-        # Zustand intern speichern
-        self.condition_groups[name] = {
+        cond_data = {
+            "id": cid,
+            "name": name,
             "description": desc,
-            "type": effect_type,            # "keine Auswirkung" | "missionsweit" | "rundenbasiert"
-            "effect_target": effect_target, # "" falls keine
-            "effect_value": effect_value,   # 0 falls keine
-            "group": group,
+            "effect_type": effect_type,
+            "effect_target": effect_target,
+            "effect_value": effect_value,
         }
 
-        # missionsweite Effekte sofort anwenden
-        if effect_type == "missionsweit":
-            self.apply_mission_effects()
-            self.apply_all_mission_effects()
+        # Refcount setzen
+        self.condition_refcount[cid] = self.condition_refcount.get(cid, 0) + 1
+
+        # speichern in active_condition_by_id + widget zeichnen
+        self.active_condition_by_id[cid] = cond_data
+        self.render_condition_block_from_condition_data(cid, cond_data, source_item=None)
+
+        # auch in condition_groups für save_character() (damit alte Save-Logik weiter funktioniert)
+        self.condition_groups[name] = {
+            "description": desc,
+            "type": effect_type,
+            "effect_target": effect_target,
+            "effect_value": effect_value,
+            "group": self.active_condition_by_id[cid]["_widget"],
+            "id": cid,
+        }
+
+        # Effekte anwenden
+        self.recalculate_conditions_effects()
 
 
 
@@ -403,6 +1272,132 @@ class CharacterCreationDialog(QDialog):
             del self.condition_groups[condition_name]
             QMessageBox.information(self, "Erfolg", f"Zustand '{condition_name}' wurde entfernt.")
         # Falls missionsweite Effekte betroffen sind → aktualisieren
+        self.apply_mission_effects()
+        self.apply_all_mission_effects()
+
+    def manual_remove_condition_by_id(self, cid):
+        """
+        Entfernt einen manuell erstellten Zustand endgültig.
+        Verringert Refcount und löscht ihn ggf. auch aus condition_groups.
+        """
+        if cid not in self.condition_refcount:
+            return
+
+        self.condition_refcount[cid] -= 1
+        if self.condition_refcount[cid] <= 0:
+            self.condition_refcount.pop(cid, None)
+            # UI entfernen
+            self.remove_condition_widget_by_id(cid)
+
+            # auch aus condition_groups löschen, falls dort drin
+            # Wir müssen über Namen iterieren, weil condition_groups keyed by name ist
+            to_delete = []
+            for name, data in self.condition_groups.items():
+                if data.get("id") == cid:
+                    to_delete.append(name)
+            for name in to_delete:
+                del self.condition_groups[name]
+
+        # Effekte neu anwenden
+        self.recalculate_conditions_effects()
+
+    def add_condition_from_library(self):
+        """Fügt dem Charakter einen bestehenden Zustand aus conditions.json hinzu (ohne Itembindung)."""
+        # 1. conditions.json laden
+        if not os.path.exists("conditions.json"):
+            QMessageBox.warning(self, "Fehler", "Keine conditions.json gefunden.")
+            return
+
+        try:
+            with open("conditions.json", "r", encoding="utf-8") as f:
+                data = json.load(f)
+                cond_list = data.get("conditions", [])
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden von conditions.json:\n{e}")
+            return
+
+        if not cond_list:
+            QMessageBox.information(self, "Hinweis", "Es sind keine Zustände in conditions.json vorhanden.")
+            return
+
+        # 2. Auswahl anzeigen
+        choices = [f"{c.get('name','(unbenannt)')} [{c.get('id','?')}]" for c in cond_list]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Zustand auswählen",
+            "Welchen Zustand möchtest du hinzufügen?",
+            choices,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        idx = choices.index(choice)
+        chosen = cond_list[idx]
+
+        # 3. Die rohen Daten dieses Zustands holen
+        cid = chosen.get("id", str(uuid.uuid4()))
+        cond_name = chosen.get("name", f"Zustand {cid[:8]}")
+        cond_description = chosen.get("description", "")
+        cond_effect_type = chosen.get("effect_type", "keine Auswirkung")
+        cond_effect_target = chosen.get("effect_target", "")
+        cond_effect_value = chosen.get("effect_value", 0)
+
+        # 4. In unsere laufenden Strukturen integrieren
+        # Falls Zustand schon aktiv ist (z. B. durch Item oder schon mal hinzugefügt), 
+        # erhöhen wir nur den Refcount und zeichnen ihn NICHT neu.
+        already_active = cid in self.active_condition_by_id
+
+        # Refcount +1
+        self.condition_refcount[cid] = self.condition_refcount.get(cid, 0) + 1
+
+        if not already_active:
+            # Zustand muss neu erzeugt und gerendert werden
+            cond_data = {
+                "id": cid,
+                "name": cond_name,
+                "description": cond_description,
+                "effect_type": cond_effect_type,
+                "effect_target": cond_effect_target,
+                "effect_value": cond_effect_value,
+            }
+
+            # merken
+            self.active_condition_by_id[cid] = cond_data
+
+            # UI-Block bauen, ohne source_item (weil direkt auf den Char angewendet)
+            self.render_condition_block_from_condition_data(cid, cond_data, source_item=None)
+
+        # 5. Effekte neu anwenden
+        self.recalculate_conditions_effects()
+
+    def recalculate_conditions_effects(self):
+        """
+        Spiegelt alle aktiven Zustände (aus Items + manuell) nach self.condition_groups,
+        damit apply_mission_effects / apply_all_mission_effects korrekt arbeiten,
+        und aktualisiert anschließend die Missionseffekte.
+        """
+        self.condition_groups = {}
+
+        for cid, cond_data in self.active_condition_by_id.items():
+            widget = cond_data.get("_widget")
+            if widget is None:
+                # Falls aus irgendeinem Grund kein UI-Widget erzeugt wurde,
+                # dann ist der Zustand nicht visuell aktiv -> überspringen.
+                continue
+
+            name_for_group = cond_data.get("name", f"Zustand {cid[:8]}")
+            self.condition_groups[name_for_group] = {
+                "description": cond_data.get("description", ""),
+                "type": cond_data.get("effect_type", "keine Auswirkung"),
+                "effect_target": cond_data.get("effect_target", ""),
+                "effect_value": cond_data.get("effect_value", 0),
+                "group": widget,
+                "id": cid,
+            }
+
+        # Deine bestehende Logik weiterverwenden:
         self.apply_mission_effects()
         self.apply_all_mission_effects()
 
@@ -616,20 +1611,25 @@ class CharacterCreationDialog(QDialog):
             name = self.name_input.text().strip()
             if not name:
                 raise ValueError("Name darf nicht leer sein.")
+
             age = int(self.age_input.text())
             if not 1 <= age <= 120:
                 raise ValueError("Alter muss zwischen 1 und 120 liegen.")
+
             hitpoints = self.base_hitpoints
             if not 1 <= hitpoints <= 100:
                 raise ValueError("Lebenspunkte müssen zwischen 1 und 100 liegen.")
+
             religion = self.religion_input.text().strip()
             occupation = self.occupation_input.text().strip()
             if not religion or not occupation:
                 raise ValueError("Religion und Beruf dürfen nicht leer sein.")
+
             total_used = 0
             skills_data = {}
             category_scores = {}
             inspiration_points = {}
+
             for category in self.skills:
                 skills_data[category] = {}
                 category_sum = 0
@@ -640,23 +1640,48 @@ class CharacterCreationDialog(QDialog):
                         raise ValueError(f"{skill}: Wert muss zwischen 0 und 100 liegen.")
                     skills_data[category][skill] = val
                     category_sum += val
+
                 total_used += category_sum
                 category_scores[category] = kaufmaennisch_runden(category_sum / 10)
                 inspiration_points[category] = kaufmaennisch_runden(category_scores[category] / 10)
+
             if total_used > 400:
                 raise ValueError("Gesamtpunkte überschreiten 400!")
+
             # Items sammeln
-            items_data = {item_name: data["attributes"] for item_name, data in self.item_groups.items()}
-            # Zustände sammeln
-            conditions_data = {
-                name: {
-                    "description": data["description"],
-                    "type": data.get("type", "missionsweit"),
-                    "effect_target": data.get("effect_target", ""),
-                    "effect_value": data.get("effect_value", 0),
+            # Wir speichern jetzt vollständiger:
+            # - attributes
+            # - id (falls vorhanden)
+            # - linked_conditions (falls vorhanden)
+            items_data = {}
+            for item_name, data in self.item_groups.items():
+                items_data[item_name] = {
+                    "attributes": data.get("attributes", {}),
+                    "id": data.get("id", None),
+                    "linked_conditions": data.get("linked_conditions", []),
                 }
-                for name, data in self.condition_groups.items()
-            }
+
+            # Zustände sammeln (für Savegame-Kompatibilität)
+            # -> wir nehmen ALLE aktiven Zustände aus self.active_condition_by_id
+            #    (also sowohl manuell erzeugte als auch durch Items automatisch aktivierte)
+            conditions_data = {}
+            for cid, cond_data in self.active_condition_by_id.items():
+                # cond_data enthält unsere Felder aus conditions.json / add_condition
+                # aber plus "_widget"; das darf NICHT in die Datei
+                cleaned = {
+                    "id": cid,
+                    "name": cond_data.get("name", ""),
+                    "description": cond_data.get("description", ""),
+                    "effect_type": cond_data.get("effect_type", "keine Auswirkung"),
+                    "effect_target": cond_data.get("effect_target", ""),
+                    "effect_value": cond_data.get("effect_value", 0),
+                }
+                # Wir legen im Savegame nach name ab, so wie du es vorher gespeichert hast,
+                # aber jetzt mit angereichertem Inhalt (inklusive id).
+                # Falls zwei Zustände denselben Anzeigenamen haben, gewinnt der letzte – das ist
+                # ok für jetzt; ein sauberer Ansatz wäre eine Liste statt dict, aber wir
+                # behalten erstmal kompatibles Format.
+                conditions_data[cleaned["name"]] = cleaned
 
         except ValueError as e:
             QMessageBox.warning(self, "Fehler", str(e) if str(e) != "" else "Bitte gültige Zahlen eingeben.")
@@ -690,10 +1715,12 @@ class CharacterCreationDialog(QDialog):
 
         self.accept()
 
+
     def load_character_data(self, character, file_path):
         """Befüllt das Formular mit den Daten eines geladenen Charakters."""
         self.loaded_file = file_path
 
+        # Basisfelder
         self.name_input.setText(character.get("name", ""))
         self.class_input.setCurrentText(character.get("class", "Krieger"))
         self.gender_input.setCurrentText(character.get("gender", "Männlich"))
@@ -705,15 +1732,31 @@ class CharacterCreationDialog(QDialog):
         self.occupation_input.setText(character.get("occupation", ""))
         self.marital_status_input.setCurrentText(character.get("marital_status", "Ledig"))
 
+        # Reset Strukturen für Fähigkeiten
+        # (Falls du reload im gleichen Dialog machst, bräuchtest du hier ein hartes "Layout cleanup".
+        # Wenn du pro Load eh neuen Dialog öffnest, ist das unkritisch.)
+        self.skills = {"Handeln": [], "Wissen": [], "Soziales": []}
+        self.skill_inputs = {"Handeln": {}, "Wissen": {}, "Soziales": {}}
+        self.skill_end_labels = {"Handeln": {}, "Wissen": {}, "Soziales": {}}
+
         # Fähigkeiten wiederherstellen
         for category, skills in character.get("skills", {}).items():
             for skill, value in skills.items():
+                if category not in self.skills:
+                    # Fallback, falls in Zukunft neue Kategorien auftauchen
+                    self.skills[category] = []
+                    self.skill_inputs[category] = {}
+                    self.skill_end_labels[category] = {}
+                    # Du müsstest hier theoretisch auch eine neue GroupBox + FormLayout bauen,
+                    # aber momentan haben wir nur Handeln/Wissen/Soziales, also ignorieren wir das für jetzt.
+
                 self.skills[category].append(skill)
+
                 input_field = QLineEdit(str(value))
                 input_field.textChanged.connect(self.update_points)
 
                 end_label = QLabel("Endwert: 0")
-                self.skill_end_labels.setdefault(category, {})[skill] = end_label
+                self.skill_end_labels[category][skill] = end_label
 
                 remove_button = QPushButton("– Entfernen")
                 remove_button.clicked.connect(lambda _, cat=category, skill=skill: self.remove_skill(cat, skill))
@@ -726,82 +1769,88 @@ class CharacterCreationDialog(QDialog):
 
                 self.skill_inputs[category][skill] = input_field
 
-        # Items wiederherstellen
-        for item_name, attributes in character.get("items", {}).items():
-            self.item_groups[item_name] = {"attributes": {}, "layout": None, "group": None}
+        # Items wiederherstellen (neues Format)
+        self.item_groups = {}
+        self.item_condition_links = {}
+
+        for item_name, item_info in character.get("items", {}).items():
+            attrs = item_info.get("attributes", {})
+            item_uuid = item_info.get("id", str(uuid.uuid4()))
+            linked_conditions = item_info.get("linked_conditions", [])
+
             item_group = QGroupBox(item_name)
             item_layout = QVBoxLayout()
 
             attr_layout = QFormLayout()
-            for attr_name, attr_value in attributes.items():
+            for attr_name, attr_value in attrs.items():
                 attr_layout.addRow(f"{attr_name}:", QLabel(str(attr_value)))
-                self.item_groups[item_name]["attributes"][attr_name] = attr_value
 
             add_attr_button = QPushButton("+ Neue Eigenschaft")
             add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
+
             remove_button = QPushButton("- Item entfernen")
-            remove_button.clicked.connect(lambda _, item=item_name: self.remove_item(item))
+            remove_button.clicked.connect(lambda _, item=item_name: self.remove_item_and_detach_conditions(item))
 
             item_layout.addLayout(attr_layout)
             item_layout.addWidget(add_attr_button)
             item_layout.addWidget(remove_button)
             item_group.setLayout(item_layout)
 
-            self.items_layout.insertWidget(self.items_layout.count() - 1, item_group)
-            self.item_groups[item_name]["layout"] = item_layout
-            self.item_groups[item_name]["group"] = item_group
-        # Zustände wiederherstellen
-        for cond_name, cond_data in character.get("conditions", {}).items():
-            # Abwärtskompatibilität zu alten Saves (reiner Text)
-            if isinstance(cond_data, str):
-                cond_data = {
-                    "description": cond_data,
-                    "type": "keine Auswirkung",
-                    "effect_target": "",
-                    "effect_value": 0,
-                }
+            # Vor die beiden Buttons ("+ Neues Item", "+ Item aus Sammlung") einfügen:
+            self.items_layout.insertWidget(self.items_layout.count() - 2, item_group)
 
-            group = QGroupBox(cond_name)
-            layout = QVBoxLayout()
-
-            desc_label = QLabel(cond_data.get("description", ""))
-            desc_label.setWordWrap(True)
-            layout.addWidget(desc_label)
-
-            cond_type = cond_data.get("type", "keine Auswirkung")
-            cond_target = cond_data.get("effect_target", "")
-            cond_value = cond_data.get("effect_value", 0)
-
-            if cond_type != "keine Auswirkung" and cond_target:
-                effect_label = QLabel(
-                    f"{cond_type.capitalize()}e Wirkung: "
-                    f"{cond_target} "
-                    f"{cond_value:+}"
-                )
-                effect_label.setStyleSheet("color: #555; font-style: italic;")
-                layout.addWidget(effect_label)
-
-            remove_button = QPushButton("– Zustand entfernen")
-            remove_button.clicked.connect(lambda _, cond=cond_name: self.remove_condition(cond))
-            layout.addWidget(remove_button)
-
-            group.setLayout(layout)
-            self.conditions_layout.insertWidget(self.conditions_layout.count() - 1, group)
-
-            self.condition_groups[cond_name] = {
-                "description": cond_data.get("description", ""),
-                "type": cond_type,
-                "effect_target": cond_target,
-                "effect_value": cond_value,
-                "group": group,
+            self.item_groups[item_name] = {
+                "attributes": dict(attrs),
+                "layout": item_layout,
+                "group": item_group,
+                "id": item_uuid,
+                "linked_conditions": linked_conditions
             }
 
-        # Nach dem Laden missionsweite Effekte anwenden
-        self.apply_mission_effects()
-        self.apply_all_mission_effects()
+            self.item_condition_links[item_name] = linked_conditions
 
+        # Zustands-Tracking komplett neu aufsetzen
+        self.active_condition_by_id = {}
+        self.condition_refcount = {}
 
+        # 1) Zustände aus Items anhängen
+        for item_name, cond_ids in self.item_condition_links.items():
+            self.attach_item_conditions(item_name, cond_ids)
+
+        # 2) Zustände aus dem Save explizit wiederherstellen (manuell aktivierte)
+        for saved_name, cond_entry in character.get("conditions", {}).items():
+            cid = cond_entry.get("id", str(uuid.uuid4()))
+            cond_data = {
+                "id": cid,
+                "name": cond_entry.get("name", saved_name),
+                "description": cond_entry.get("description", ""),
+                "effect_type": cond_entry.get("effect_type", "keine Auswirkung"),
+                "effect_target": cond_entry.get("effect_target", ""),
+                "effect_value": cond_entry.get("effect_value", 0),
+            }
+
+            # Refcount erhöhen -> Zustand ist aktiv laut Save
+            self.condition_refcount[cid] = self.condition_refcount.get(cid, 0) + 1
+
+            if cid not in self.active_condition_by_id:
+                # Zustand ist noch nicht durch ein Item gekommen -> wir müssen ihn rendern
+                self.active_condition_by_id[cid] = cond_data
+                self.render_condition_block_from_condition_data(cid, cond_data, source_item=None)
+            else:
+                # Zustand kam schon durch ein Item rein, hat also schon ein _widget.
+                # Wir wollen ihn nur "aufwerten", damit er nicht verschwindet, wenn Item entfernt wird.
+                # Das ist schon durch den refcount erledigt.
+                pass
+
+        # WICHTIG:
+        # condition_groups NICHT hier manuell bauen!
+        # Stattdessen den zentralen Weg benutzen:
+        self.recalculate_conditions_effects()
+
+        # Skills / Endwerte aktualisieren
         self.update_points()
+
+
 
 
     def get_next_id(self):
@@ -848,6 +1897,23 @@ class WelcomeWindow(QMainWindow):
         load_button.clicked.connect(self.load_character)
         layout.addWidget(load_button)
 
+        new_item_button = QPushButton("Neues Item erstellen", self)
+        new_item_button.clicked.connect(self.create_new_item)
+        layout.addWidget(new_item_button)
+
+        load_item_button = QPushButton("Bestehendes Item laden", self)
+        load_item_button.clicked.connect(self.load_item)
+        layout.addWidget(load_item_button)
+
+        new_condition_button = QPushButton("Neuen Zustand erstellen", self)
+        new_condition_button.clicked.connect(self.create_new_condition)
+        layout.addWidget(new_condition_button)
+
+        load_condition_button = QPushButton("Bestehenden Zustand laden", self)
+        load_condition_button.clicked.connect(self.load_condition)
+        layout.addWidget(load_condition_button)
+
+
         layout.addStretch()
 
 
@@ -887,6 +1953,122 @@ class WelcomeWindow(QMainWindow):
         dialog = CharacterCreationDialog(self)
         dialog.load_character_data(character, file_name)
         dialog.exec()
+
+    def create_new_item(self):
+        """Öffnet den Item-Editor leer für ein neues Item."""
+        dlg = ItemEditorDialog(self)
+        # Neue UUID direkt setzen, damit beim Speichern klar ist, wer das ist
+        dlg.item_id = str(uuid.uuid4())
+        dlg.exec()
+
+    def load_item(self):
+        """Lädt items.json ODER eine andere Datei, lässt den Nutzer ein Item auswählen, öffnet es im Editor."""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Item-Datei öffnen",
+            "",
+            "JSON Dateien (*.json);;Alle Dateien (*)"
+        )
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden der Datei:\n{e}")
+            return
+
+        # Erwartet { "items": [ {...}, {...} ] }
+        if not (isinstance(data, dict) and "items" in data and isinstance(data["items"], list)):
+            QMessageBox.warning(self, "Fehler", "In der ausgewählten Datei wurden keine Items gefunden.")
+            return
+
+        items_list = data["items"]
+        if not items_list:
+            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Items.")
+            return
+
+        # Falls mehrere Items drin sind: den Nutzer auswählen lassen
+        item_names = [f"{it.get('name','(unbenannt)')} [{it.get('id','?')}]" for it in items_list]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Item auswählen",
+            "Welches Item möchtest du bearbeiten?",
+            item_names,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        # anhand der Auswahl das konkrete Item raussuchen
+        chosen_index = item_names.index(choice)
+        chosen_item = items_list[chosen_index]
+
+        # Editor öffnen und Item laden
+        dlg = ItemEditorDialog(self)
+        dlg.load_item_data(chosen_item, file_name)
+        dlg.exec()
+
+    def create_new_condition(self):
+        """Öffnet den Zustands-Editor leer zum Erstellen eines neuen Zustands."""
+        dlg = ConditionEditorDialog(self)
+        dlg.condition_id = str(uuid.uuid4())  # direkt frische UUID vergeben
+        dlg.exec()
+
+    def load_condition(self):
+        """Lädt eine conditions.json (oder andere Datei), lässt den Nutzer einen Zustand wählen und öffnet ihn im Editor."""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Zustands-Datei öffnen",
+            "",
+            "JSON Dateien (*.json);;Alle Dateien (*)"
+        )
+        if not file_name:
+            return
+
+        try:
+            with open(file_name, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden der Datei:\n{e}")
+            return
+
+        # erwartet { "conditions": [ {...}, {...} ] }
+        if not (isinstance(data, dict) and "conditions" in data and isinstance(data["conditions"], list)):
+            QMessageBox.warning(self, "Fehler", "In der ausgewählten Datei wurden keine Zustände gefunden.")
+            return
+
+        conditions_list = data["conditions"]
+        if not conditions_list:
+            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Zustände.")
+            return
+
+        # Auswahl anzeigen
+        cond_choices = [
+            f"{c.get('name', '(unbenannt)')} [{c.get('id','?')}]"
+            for c in conditions_list
+        ]
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Zustand auswählen",
+            "Welchen Zustand möchtest du bearbeiten?",
+            cond_choices,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        chosen_index = cond_choices.index(choice)
+        chosen_condition = conditions_list[chosen_index]
+
+        dlg = ConditionEditorDialog(self)
+        dlg.load_condition_data(chosen_condition, file_name)
+        dlg.exec()
+
 
 
 if __name__ == "__main__":
