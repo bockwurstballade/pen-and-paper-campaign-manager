@@ -1,0 +1,29 @@
+# Python bytecode cache
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+
+# Virtual environments (optional but recommended)
+venv/
+env/
+.venv/
+ENV/
+
+# IDE/Editor artifacts (optional)
+.idea/
+.vscode/
+*.sublime-*
+__pycache__/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
