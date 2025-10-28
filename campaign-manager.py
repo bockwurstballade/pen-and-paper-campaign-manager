@@ -5,7 +5,7 @@ import uuid
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit
+    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox
 )
 
 
@@ -2601,6 +2601,8 @@ class WelcomeWindow(QMainWindow):
 
 class CombatDialog(QDialog):
     def __init__(self, parent=None):
+        self.surprised_ids = set()
+
         super().__init__(parent)
 
         self.setWindowTitle("Kampf-Übersicht")
@@ -2652,15 +2654,41 @@ class CombatDialog(QDialog):
         main_layout.addLayout(right_layout)
 
         self.start_battle_button = QPushButton("Kampf starten (Initiative bestimmen)")
+        self.set_surprise_button = QPushButton("Überraschungsrunde festlegen")
+        self.set_surprise_button.clicked.connect(self.set_surprise_round)
+        right_layout.addWidget(self.set_surprise_button)
         self.start_battle_button.clicked.connect(self.start_battle)
         right_layout.addWidget(self.start_battle_button)
+
+    def set_surprise_round(self):
+        """Öffnet den Dialog, um überrascht markierte Kämpfer zu wählen"""
+        if not self.battle_actors:
+            QMessageBox.information(self, "Hinweis", "Keine Kämpfer im Kampf.")
+            return
+
+        dlg = SurpriseDialog(self.battle_actors, self)
+        if dlg.exec():
+            self.surprised_ids = dlg.get_surprised_ids()
+            if self.surprised_ids:
+                names = [
+                    a["display_name"]
+                    for a in self.battle_actors
+                    if a["instance_id"] in self.surprised_ids
+                ]
+                msg = "<br>".join(names)
+                QMessageBox.information(
+                    self, "Überraschungsrunde",
+                    f"Folgende Kämpfer sind überrascht:<br><br>{msg}"
+                )
+            else:
+                QMessageBox.information(self, "Überraschungsrunde", "Niemand ist überrascht.")
 
     def start_battle(self):
         if not self.battle_actors:
             QMessageBox.information(self, "Hinweis", "Keine Kämpfer im Kampf.")
             return
 
-        dlg = InitiativeDialog(self.battle_actors, self)
+        dlg = InitiativeDialog(self.battle_actors, self, surprised_ids=self.surprised_ids)
         if dlg.exec():
             order = dlg.get_sorted_initiative()
             if order:
@@ -2903,12 +2931,13 @@ class CombatDialog(QDialog):
             self.actors_layout.addWidget(box)
 
 class InitiativeDialog(QDialog):
-    def __init__(self, battle_actors, parent=None):
+    def __init__(self, battle_actors, parent=None, surprised_ids=None):
         super().__init__(parent)
         self.setWindowTitle("Initiative bestimmen")
         self.setGeometry(300, 200, 600, 500)
 
         self.battle_actors = battle_actors  # aus CombatDialog
+        self.surprised_ids = surprised_ids or set()
         self.initiatives = {}  # instance_id → total_initiative
 
         layout = QVBoxLayout(self)
@@ -2929,7 +2958,7 @@ class InitiativeDialog(QDialog):
             bonus_input = QLineEdit()
             bonus_input.setPlaceholderText("Bonus/Malus")
 
-            h.addWidget(QLabel(actor["display_name"]))
+            h.addWidget(QLabel(actor["display_name"] + (" 😮" if actor["instance_id"] in self.surprised_ids else "")))
             h.addWidget(roll_input)
             h.addWidget(bonus_input)
             self.inputs[actor["instance_id"]] = {
@@ -3088,6 +3117,67 @@ class InitiativeDialog(QDialog):
                 continue
         return "npc"
 
+
+class SurpriseDialog(QDialog):
+    def __init__(self, battle_actors, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Überraschungsrunde festlegen")
+        self.setGeometry(350, 250, 500, 400)
+
+        self.battle_actors = battle_actors
+        self.checkboxes = {}
+        self.team_checkboxes = {}
+
+        layout = QVBoxLayout(self)
+
+        # Finde alle Teams
+        teams = sorted(set(a["team"] for a in battle_actors))
+
+        for team_name in teams:
+            group = QGroupBox(team_name)
+            vbox = QVBoxLayout()
+
+            # Team-Gesamt-Checkbox
+            team_cb = QCheckBox(f"Gesamtes Team '{team_name}' überrascht")
+            self.team_checkboxes[team_name] = team_cb
+            vbox.addWidget(team_cb)
+
+            # Einzelne Kämpfer dieses Teams
+            for actor in [a for a in battle_actors if a["team"] == team_name]:
+                cb = QCheckBox(actor["display_name"])
+                self.checkboxes[actor["instance_id"]] = cb
+                vbox.addWidget(cb)
+
+            # Wenn Team angehakt → alle untergeordneten Kämpfer aktivieren
+            def make_handler(tn=team_name):
+                def handler(state):
+                    checked = state == Qt.CheckState.Checked.value
+                    for aid, cb in self.checkboxes.items():
+                        for a in self.battle_actors:
+                            if a["instance_id"] == aid and a["team"] == tn:
+                                cb.setChecked(checked)
+                return handler
+
+            team_cb.stateChanged.connect(make_handler())
+
+            group.setLayout(vbox)
+            layout.addWidget(group)
+
+        layout.addStretch()
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("Abbrechen")
+        cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(ok_btn)
+        btn_row.addWidget(cancel_btn)
+        layout.addLayout(btn_row)
+
+    def get_surprised_ids(self):
+        """Gibt Menge von instance_ids zurück, die überrascht sind"""
+        return {aid for aid, cb in self.checkboxes.items() if cb.isChecked()}
 
 
 if __name__ == "__main__":
