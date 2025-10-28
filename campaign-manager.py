@@ -620,6 +620,8 @@ class CharacterCreationDialog(QDialog):
 
     def __init__(self, parent=None):
         self.loaded_file = None
+        self.loaded_file = None      # Pfad zur Datei auf Platte (wenn geladen/gespeichert)
+        self.char_id = None          # UUID des Charakters
 
         super().__init__(parent)
         self.setWindowTitle("Neuen Charakter erstellen")
@@ -1687,8 +1689,12 @@ class CharacterCreationDialog(QDialog):
             QMessageBox.warning(self, "Fehler", str(e) if str(e) != "" else "Bitte gültige Zahlen eingeben.")
             return
 
+        # Stelle sicher, dass der Charakter eine stabile ID hat
+        if not self.char_id:
+            self.char_id = str(uuid.uuid4())
+
         character = {
-            "id": self.get_next_id(),
+            "id": self.char_id,
             "name": name,
             "class": self.class_input.currentText(),
             "gender": self.gender_input.currentText(),
@@ -1705,21 +1711,39 @@ class CharacterCreationDialog(QDialog):
             "conditions": conditions_data
         }
 
+        # Speicherort bestimmen
+        # Falls wir schon aus einer Datei geladen wurden oder bereits gespeichert haben:
         if self.loaded_file:
-            with open(self.loaded_file, "w", encoding="utf-8") as f:
-                json.dump(character, f, indent=4, ensure_ascii=False)
-            QMessageBox.information(self, "Erfolg", f"Charakter '{name}' wurde aktualisiert!")
+            target_path = self.loaded_file
         else:
-            self.save_to_json(character)
-            QMessageBox.information(self, "Erfolg", f"Neuer Charakter '{name}' wurde gespeichert!")
+            # Ordner characters/ anlegen, falls nicht vorhanden
+            os.makedirs("characters", exist_ok=True)
 
+            # Dateiname z. B. "characters/<uuid>_<name>.json"
+            safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).strip()
+            if not safe_name:
+                safe_name = "unbenannt"
+            target_path = os.path.join("characters", f"{self.char_id} - {safe_name}.json")
+
+            # Das merken wir uns für zukünftige Saves in dieser Session
+            self.loaded_file = target_path
+
+        # JSON schreiben
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(character, f, indent=4, ensure_ascii=False)
+
+        QMessageBox.information(self, "Erfolg", f"Charakter '{name}' wurde gespeichert:\n{target_path}")
         self.accept()
+
 
 
     def load_character_data(self, character, file_path):
         """Befüllt das Formular mit den Daten eines geladenen Charakters."""
         self.loaded_file = file_path
 
+        # Datei & ID merken
+        self.loaded_file = file_path
+        self.char_id = character.get("id", str(uuid.uuid4()))
         # Basisfelder
         self.name_input.setText(character.get("name", ""))
         self.class_input.setCurrentText(character.get("class", "Krieger"))
@@ -1850,26 +1874,6 @@ class CharacterCreationDialog(QDialog):
         # Skills / Endwerte aktualisieren
         self.update_points()
 
-
-
-
-    def get_next_id(self):
-        characters = self.load_characters()
-        return max([char["id"] for char in characters], default=0) + 1
-
-    def load_characters(self):
-        if os.path.exists("characters.json"):
-            with open("characters.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                return data.get("characters", [])
-        return []
-
-    def save_to_json(self, character):
-        characters = self.load_characters()
-        characters.append(character)
-        with open("characters.json", "w", encoding="utf-8") as f:
-            json.dump({"characters": characters}, f, indent=4)
-
 class WelcomeWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1919,40 +1923,63 @@ class WelcomeWindow(QMainWindow):
 
     def start_character_creation(self):
         dialog = CharacterCreationDialog(self)
+        dialog.char_id = str(uuid.uuid4())  # neue frische ID vergeben
         dialog.exec()
+
 
     def load_character(self):
-        file_name, _ = QFileDialog.getOpenFileName(
+        # Verzeichnis sicherstellen
+        if not os.path.exists("characters"):
+            QMessageBox.information(self, "Hinweis", "Es wurden noch keine Charaktere gespeichert.")
+            return
+
+        # Alle JSON-Dateien einsammeln
+        candidates = []
+        for fname in os.listdir("characters"):
+            if fname.lower().endswith(".json"):
+                full_path = os.path.join("characters", fname)
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+
+                    # wir erwarten ein einzelnes Charakter-Objekt (unser neues Format)
+                    char_name = data.get("name", "(unbenannt)")
+                    char_class = data.get("class", "?")
+                    char_age = data.get("age", "?")
+                    char_id = data.get("id", "???")
+
+                    display = f"{char_name} | {char_class}, {char_age} Jahre [{char_id[:8]}...]"
+                    candidates.append((display, full_path, data))
+                except Exception:
+                    # Datei ignorieren, wenn sie nicht lesbar ist
+                    pass
+
+        if not candidates:
+            QMessageBox.information(self, "Hinweis", "Keine gültigen Charakterdateien gefunden.")
+            return
+
+        # Liste der Anzeigenamen für Auswahl
+        display_names = [c[0] for c in candidates]
+
+        choice, ok = QInputDialog.getItem(
             self,
-            "Charakterdatei öffnen",
-            "",
-            "JSON Dateien (*.json);;Alle Dateien (*)"
+            "Charakter wählen",
+            "Welchen Charakter möchtest du laden?",
+            display_names,
+            0,
+            False
         )
-        if not file_name:
+        if not ok:
             return
 
-        try:
-            with open(file_name, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden der Datei:\n{e}")
-            return
+        idx = display_names.index(choice)
+        chosen_display, chosen_path, chosen_data = candidates[idx]
 
-        # Prüfen, ob Datei eine Liste oder Sammlung enthält
-        if isinstance(data, dict) and "characters" in data:
-            characters = data["characters"]
-            if not characters:
-                QMessageBox.warning(self, "Fehler", "Keine Charaktere in der Datei gefunden.")
-                return
-
-            # Falls mehrere vorhanden, optional Auswahldialog (später)
-            character = characters[0]  # aktuell: immer ersten laden
-        else:
-            character = data  # einzelner Charakter direkt gespeichert
-
+        # Dialog öffnen und Daten rein
         dialog = CharacterCreationDialog(self)
-        dialog.load_character_data(character, file_name)
+        dialog.load_character_data(chosen_data, chosen_path)
         dialog.exec()
+
 
     def create_new_item(self):
         """Öffnet den Item-Editor leer für ein neues Item."""
