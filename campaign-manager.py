@@ -380,6 +380,8 @@ class ItemEditorDialog(QDialog):
         attrs = item_data.get("attributes", {})
         for attr_name, attr_value in attrs.items():
             self.add_attribute_row(preset_name=attr_name, preset_value=attr_value)
+        self.toggle_weapon_fields()
+
 
     def save_item(self):
         """
@@ -404,11 +406,17 @@ class ItemEditorDialog(QDialog):
         if not self.item_id:
             self.item_id = str(uuid.uuid4())
 
+        # --- WICHTIG: richtige Widgets verwenden ---
+        is_weapon = self.is_weapon_checkbox.isChecked()
+        damage_formula = self.damage_formula_input.text().strip() if self.is_weapon_checkbox.isChecked() else ""
+
         item_obj = {
             "id": self.item_id,
             "name": name,
             "description": description,
             "attributes": attributes,
+            "is_weapon": is_weapon,
+            "damage_formula": damage_formula,
             "linked_conditions": self.linked_conditions
         }
 
@@ -444,6 +452,7 @@ class ItemEditorDialog(QDialog):
 
         QMessageBox.information(self, "Erfolg", f"Item '{name}' wurde gespeichert!")
         self.accept()
+
 
 
 class ConditionEditorDialog(QDialog):
@@ -1943,6 +1952,8 @@ class CharacterCreationDialog(QDialog):
         self.religion_input.setText(character.get("religion", ""))
         self.occupation_input.setText(character.get("occupation", ""))
         self.marital_status_input.setCurrentText(character.get("marital_status", "Ledig"))
+        self.base_damage_input.setText(character.get("base_damage", ""))
+
 
         # Reset Strukturen für Fähigkeiten
         # (Falls du reload im gleichen Dialog machst, bräuchtest du hier ein hartes "Layout cleanup".
@@ -1996,6 +2007,26 @@ class CharacterCreationDialog(QDialog):
             attr_layout = QFormLayout()
             for attr_name, attr_value in attrs.items():
                 attr_layout.addRow(f"{attr_name}:", QLabel(str(attr_value)))
+
+            # --- Waffenbereich ---
+            is_weapon = item_info.get("is_weapon", False)
+            damage_formula = item_info.get("damage_formula", "")
+            weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
+            weapon_checkbox.setChecked(is_weapon)
+            damage_input = QLineEdit()
+            damage_input.setPlaceholderText("z. B. 2W10+5")
+            damage_input.setText(damage_formula)
+            damage_row = QHBoxLayout()
+            damage_row.addWidget(QLabel("Schadensformel:"))
+            damage_row.addWidget(damage_input)
+
+            # Schadensformel nur anzeigen, wenn Checkbox aktiv ist
+            damage_input.setVisible(is_weapon)
+
+            def on_weapon_toggle(state, dmg_input=damage_input):
+                dmg_input.setVisible(state == Qt.CheckState.Checked.value)
+
+            weapon_checkbox.stateChanged.connect(on_weapon_toggle)
 
             add_attr_button = QPushButton("+ Neue Eigenschaft")
             add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
