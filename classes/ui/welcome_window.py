@@ -13,6 +13,10 @@ from PyQt6.QtCore import Qt
 ## eigene Klassen
 ### Untermenüs (einzelne Buttons)
 from classes.ui.dice_roll_dialog import DiceRollDialog
+from classes.ui.combat_dialog import CombatDialog
+from classes.ui.character_creation_dialog import CharacterCreationDialog
+from classes.ui.item_editor_dialog import ItemEditorDialog
+from classes.ui.condition_editor_dialog import ConditionEditorDialog
 
 class WelcomeWindow(QMainWindow):
     """
