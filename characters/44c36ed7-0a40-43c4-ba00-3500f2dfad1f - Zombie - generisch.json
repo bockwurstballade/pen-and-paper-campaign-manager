@@ -1,0 +1,34 @@
+{
+    "id": "44c36ed7-0a40-43c4-ba00-3500f2dfad1f",
+    "name": "Zombie - generisch",
+    "class": "Krieger",
+    "gender": "Divers",
+    "age": 100,
+    "hitpoints": 80,
+    "base_damage": "2W10",
+    "build": "Schlank",
+    "religion": "",
+    "occupation": "",
+    "marital_status": "Ledig",
+    "skills": {
+        "Handeln": {
+            "Hauen": 50,
+            "Beißen": 50
+        },
+        "Wissen": {},
+        "Soziales": {}
+    },
+    "category_scores": {
+        "Handeln": 10,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "inspiration_points": {
+        "Handeln": 1,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "items": {},
+    "conditions": {},
+    "role": "npc"
+}

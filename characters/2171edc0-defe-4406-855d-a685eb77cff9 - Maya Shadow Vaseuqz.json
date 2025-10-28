@@ -1,0 +1,42 @@
+{
+    "id": "2171edc0-defe-4406-855d-a685eb77cff9",
+    "name": "Maya Shadow Vaseuqz",
+    "class": "Krieger",
+    "gender": "Männlich",
+    "age": 42,
+    "hitpoints": 100,
+    "base_damage": "2W10",
+    "build": "Schlank",
+    "religion": "",
+    "occupation": "",
+    "marital_status": "Verwitwet",
+    "skills": {
+        "Handeln": {
+            "Schießen": 70,
+            "Akrobatik": 50
+        },
+        "Wissen": {},
+        "Soziales": {}
+    },
+    "category_scores": {
+        "Handeln": 12,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "inspiration_points": {
+        "Handeln": 1,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "items": {
+        "G36": {
+            "attributes": {},
+            "id": "631e7304-81f9-4091-9630-10bb01986d5d",
+            "linked_conditions": [],
+            "is_weapon": true,
+            "damage_formula": "7W10"
+        }
+    },
+    "conditions": {},
+    "role": "pc"
+}

@@ -1,0 +1,42 @@
+{
+    "id": "e042c419-9248-412b-bd05-67d4ca4fcaf9",
+    "name": "Charlotte Sukhimov",
+    "class": "Krieger",
+    "gender": "Weiblich",
+    "age": 19,
+    "hitpoints": 100,
+    "base_damage": "1W10",
+    "build": "Schlank",
+    "religion": "",
+    "occupation": "",
+    "marital_status": "Ledig",
+    "skills": {
+        "Handeln": {
+            "Schwertkampf": 70,
+            "Tanzen": 50
+        },
+        "Wissen": {},
+        "Soziales": {}
+    },
+    "category_scores": {
+        "Handeln": 12,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "inspiration_points": {
+        "Handeln": 1,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "items": {
+        "Katana": {
+            "attributes": {},
+            "id": "70048849-38d5-4da8-9520-b0bb4492f6dc",
+            "linked_conditions": [],
+            "is_weapon": true,
+            "damage_formula": "5W10"
+        }
+    },
+    "conditions": {},
+    "role": "pc"
+}
