@@ -5,8 +5,9 @@ import uuid
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QScrollArea
+    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit
 )
+
 
 from PyQt6.QtCore import Qt
 from decimal import Decimal, ROUND_HALF_UP
@@ -694,6 +695,10 @@ class CharacterCreationDialog(QDialog):
         self.base_form.addRow("Religion:", self.religion_input)
         self.base_form.addRow("Beruf:", self.occupation_input)
         self.base_form.addRow("Familienstand:", self.marital_status_input)
+        self.role_input = QComboBox()
+        self.role_input.addItems(["Spielercharakter", "NSC / Gegner"])
+        self.base_form.insertRow(0, "Typ:", self.role_input)
+
 
         main_layout.addLayout(self.base_form)
 
@@ -1775,7 +1780,8 @@ class CharacterCreationDialog(QDialog):
             "category_scores": category_scores,
             "inspiration_points": inspiration_points,
             "items": items_data,
-            "conditions": conditions_data
+            "conditions": conditions_data,
+            "role": "pc" if self.role_input.currentText().startswith("Spieler") else "npc"
         }
 
         # Speicherort bestimmen
@@ -1940,6 +1946,13 @@ class CharacterCreationDialog(QDialog):
 
         # Skills / Endwerte aktualisieren
         self.update_points()
+        # Charakter Rolle
+        role = character.get("role", "pc")
+        if role == "npc":
+            self.role_input.setCurrentText("NSC / Gegner")
+        else:
+            self.role_input.setCurrentText("Spielercharakter")
+
 
 class DiceRollDialog(QDialog):
     def __init__(self, parent=None):
@@ -2337,6 +2350,9 @@ class WelcomeWindow(QMainWindow):
         roll_button.clicked.connect(self.open_roll_dialog)
         layout.addWidget(roll_button)
 
+        combat_button = QPushButton("Kampf starten", self)
+        combat_button.clicked.connect(self.start_combat)
+        layout.addWidget(combat_button)
 
         layout.addStretch()
 
@@ -2388,6 +2404,10 @@ class WelcomeWindow(QMainWindow):
         inspiration_targets = [f"Geistesblitzpunkte: {cat}" for cat in sorted(category_set)]
 
         return skill_targets, category_targets, inspiration_targets
+
+    def start_combat(self):
+        dlg = CombatDialog(self)
+        dlg.exec()
 
 
     def start_character_creation(self):
@@ -2578,6 +2598,495 @@ class WelcomeWindow(QMainWindow):
         dlg = ConditionEditorDialog(self)
         dlg.load_condition_data(chosen_condition, file_name)
         dlg.exec()
+
+class CombatDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        self.setWindowTitle("Kampf-Übersicht")
+        self.setGeometry(200, 200, 600, 500)
+
+        # --- State ---
+        # Liste aller aktiven Kämpfer im aktuellen Kampf
+        # each: { "instance_id", "source_char_id", "display_name", "team", "current_hp", "max_hp" }
+        self.battle_actors = []
+
+        # Teams verwalten
+        self.teams = ["Team A", "Team B"]
+
+        # --- Layout ---
+        main_layout = QHBoxLayout(self)
+
+        left_layout = QVBoxLayout()
+        right_layout = QVBoxLayout()
+
+        # Team-Auswahl
+        self.team_select = QComboBox()
+        self.team_select.addItems(self.teams)
+        self.add_team_button = QPushButton("+ Team hinzufügen")
+        self.add_team_button.clicked.connect(self.add_new_team)
+
+        left_layout.addWidget(QLabel("Neuen Kämpfer hinzufügen:"))
+        left_layout.addWidget(QLabel("Team:"))
+        left_layout.addWidget(self.team_select)
+        left_layout.addWidget(self.add_team_button)
+
+        # Buttons: PC / NSC hinzufügen
+        self.add_pc_button = QPushButton("Spielercharakter hinzufügen")
+        self.add_pc_button.clicked.connect(lambda: self.add_combatant(from_role="pc"))
+        left_layout.addWidget(self.add_pc_button)
+
+        self.add_npc_button = QPushButton("NSC hinzufügen")
+        self.add_npc_button.clicked.connect(lambda: self.add_combatant(from_role="npc"))
+        left_layout.addWidget(self.add_npc_button)
+
+        left_layout.addStretch()
+
+        # Rechts: aktuelle Kampfteilnehmer
+        right_layout.addWidget(QLabel("Teilnehmer im Kampf:"))
+        self.actors_layout = QVBoxLayout()
+        right_layout.addLayout(self.actors_layout)
+        right_layout.addStretch()
+
+        main_layout.addLayout(left_layout)
+        main_layout.addLayout(right_layout)
+
+        self.start_battle_button = QPushButton("Kampf starten (Initiative bestimmen)")
+        self.start_battle_button.clicked.connect(self.start_battle)
+        right_layout.addWidget(self.start_battle_button)
+
+    def start_battle(self):
+        if not self.battle_actors:
+            QMessageBox.information(self, "Hinweis", "Keine Kämpfer im Kampf.")
+            return
+
+        dlg = InitiativeDialog(self.battle_actors, self)
+        if dlg.exec():
+            order = dlg.get_sorted_initiative()
+            if order:
+                self.set_initiative_order(order)
+
+    def set_initiative_order(self, order):
+        """Speichert die Reihenfolge und zeigt sie im CombatDialog an"""
+        self.turn_order = [r["actor"] for r in order]
+        self.current_turn_index = 0
+
+        # Falls noch kein UI-Bereich existiert, erstellen wir ihn
+        if not hasattr(self, "turn_area"):
+            self.turn_area = QVBoxLayout()
+
+            self.current_turn_label = QLabel()
+            self.turn_area.addWidget(self.current_turn_label)
+
+            self.order_list_widget = QTextEdit()
+            self.order_list_widget.setReadOnly(True)
+            self.turn_area.addWidget(self.order_list_widget)
+
+            # Buttons
+            btns = QHBoxLayout()
+            self.next_turn_btn = QPushButton("▶️ Nächster Zug")
+            self.next_turn_btn.clicked.connect(self.next_turn)
+            btns.addWidget(self.next_turn_btn)
+
+            self.reset_round_btn = QPushButton("🔁 Neue Runde")
+            self.reset_round_btn.clicked.connect(self.reset_round)
+            btns.addWidget(self.reset_round_btn)
+
+            self.turn_area.addLayout(btns)
+
+            # Füge das unten an (z. B. unter den Teilnehmern)
+            self.layout().addLayout(self.turn_area)
+
+        self.refresh_turn_display()
+
+    def refresh_turn_display(self):
+        if not hasattr(self, "turn_order") or not self.turn_order:
+            return
+
+        current_actor = self.turn_order[self.current_turn_index]
+        self.current_turn_label.setText(
+            f"<b>Aktuell am Zug:</b> {current_actor['display_name']} ({current_actor['team']})"
+        )
+
+        # gesamte Reihenfolge anzeigen
+        text = ""
+        for i, actor in enumerate(self.turn_order, start=1):
+            prefix = "➡️ " if i - 1 == self.current_turn_index else ""
+            text += f"{prefix}{i}. {actor['display_name']} ({actor['team']})\n"
+
+        self.order_list_widget.setText(text)
+
+    def next_turn(self):
+        if not hasattr(self, "turn_order") or not self.turn_order:
+            return
+        self.current_turn_index += 1
+        if self.current_turn_index >= len(self.turn_order):
+            QMessageBox.information(self, "Neue Runde", "Alle Kämpfer hatten ihren Zug. Neue Runde beginnt!")
+            self.current_turn_index = 0
+        self.refresh_turn_display()
+
+    def reset_round(self):
+        if not hasattr(self, "turn_order") or not self.turn_order:
+            return
+        self.current_turn_index = 0
+        QMessageBox.information(self, "Runde zurückgesetzt", "Die Initiative startet wieder bei Runde 1.")
+        self.refresh_turn_display()
+
+
+    def add_new_team(self):
+        name, ok = QInputDialog.getText(self, "Neues Team", "Team-Name:")
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if name in self.teams:
+            QMessageBox.information(self, "Hinweis", "Team existiert bereits.")
+            return
+        self.teams.append(name)
+        self.team_select.addItem(name)
+        self.team_select.setCurrentText(name)
+
+    def add_combatant(self, from_role):
+        # from_role ist "pc" oder "npc"
+        candidates = self.load_characters_by_role(from_role)
+        if not candidates:
+            QMessageBox.information(self, "Hinweis", f"Keine {from_role.upper()}-Charaktere gefunden.")
+            return
+
+        # Liste für User lesbar
+        display_names = [c["display"] for c in candidates]
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Charakter wählen",
+            "Wen willst du in den Kampf schicken?",
+            display_names,
+            0,
+            False
+        )
+        if not ok:
+            return
+
+        idx = display_names.index(choice)
+        chosen_char = candidates[idx]["data"]  # das echte JSON vom Charakter
+
+        base_name = chosen_char.get("name", "Unbenannt")
+        max_hp = chosen_char.get("hitpoints", 0)
+        source_id = chosen_char.get("id", "???")
+
+        team_name = self.team_select.currentText()
+
+        # Wenn NPC → nach Anzahl fragen
+        count = 1
+        if from_role == "npc":
+            count_txt, ok = QInputDialog.getText(
+                self,
+                "Anzahl",
+                f"Wieviele Instanzen von '{base_name}' hinzufügen?"
+            )
+            if not ok:
+                return
+            try:
+                count_val = int(count_txt)
+                if count_val < 1:
+                    raise ValueError
+            except ValueError:
+                QMessageBox.warning(self, "Fehler", "Bitte eine ganze Zahl >=1 eingeben.")
+                return
+            count = count_val
+
+        # Instanzen erzeugen
+        for i in range(count):
+            inst_name = base_name if count == 1 else f"{base_name} #{i+1}"
+
+            actor = {
+                "instance_id": str(uuid.uuid4()),
+                "source_char_id": source_id,
+                "display_name": inst_name,
+                "team": team_name,
+                "current_hp": max_hp,
+                "max_hp": max_hp,
+            }
+            self.battle_actors.append(actor)
+
+        # UI neu aufbauen
+        self.refresh_actor_list()
+
+    def load_characters_by_role(self, role_filter):
+        """
+        role_filter ist "pc" oder "npc".
+        Wir durchsuchen ./characters und lesen jeden JSON.
+        Gibt Liste aus Dicts zurück:
+        { "display": "...", "path": "...", "data": {...} }
+        """
+        results = []
+        if not os.path.exists("characters"):
+            return results
+
+        for fname in os.listdir("characters"):
+            if not fname.lower().endswith(".json"):
+                continue
+            full_path = os.path.join("characters", fname)
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+
+            if data.get("role", "pc") != role_filter:
+                continue
+
+            char_name = data.get("name", "(unbenannt)")
+            char_class = data.get("class", "?")
+            char_hp = data.get("hitpoints", "?")
+            display = f"{char_name} [{char_class}] HP:{char_hp}"
+
+            results.append({
+                "display": display,
+                "path": full_path,
+                "data": data,
+            })
+
+        return results
+
+    def refresh_actor_list(self):
+        # Erstmal alles leerräumen
+        while self.actors_layout.count():
+            item = self.actors_layout.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+
+        # Für jede Instanz einen kleinen Block bauen
+        for actor in self.battle_actors:
+            box = QGroupBox(f"{actor['display_name']} ({actor['team']})")
+            box.setStyleSheet("QGroupBox { font-weight:bold; }")
+            v = QVBoxLayout()
+
+            hp_label = QLabel(f"HP: {actor['current_hp']}/{actor['max_hp']}")
+            v.addWidget(hp_label)
+
+            # Buttons für HP +/- und Entfernen
+            btn_row = QHBoxLayout()
+
+            minus_btn = QPushButton("-1 HP")
+            plus_btn = QPushButton("+1 HP")
+            remove_btn = QPushButton("Entfernen")
+
+            def make_minus(a=actor, l=hp_label):
+                def _inner():
+                    a["current_hp"] = max(0, a["current_hp"] - 1)
+                    l.setText(f"HP: {a['current_hp']}/{a['max_hp']}")
+                return _inner
+
+            def make_plus(a=actor, l=hp_label):
+                def _inner():
+                    a["current_hp"] = min(a["max_hp"], a["current_hp"] + 1)
+                    l.setText(f"HP: {a['current_hp']}/{a['max_hp']}")
+                return _inner
+
+            def make_remove(a=actor):
+                def _inner():
+                    self.battle_actors = [x for x in self.battle_actors if x["instance_id"] != a["instance_id"]]
+                    self.refresh_actor_list()
+                return _inner
+
+            minus_btn.clicked.connect(make_minus())
+            plus_btn.clicked.connect(make_plus())
+            remove_btn.clicked.connect(make_remove())
+
+            btn_row.addWidget(minus_btn)
+            btn_row.addWidget(plus_btn)
+            btn_row.addWidget(remove_btn)
+
+            v.addLayout(btn_row)
+            box.setLayout(v)
+            self.actors_layout.addWidget(box)
+
+class InitiativeDialog(QDialog):
+    def __init__(self, battle_actors, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Initiative bestimmen")
+        self.setGeometry(300, 200, 600, 500)
+
+        self.battle_actors = battle_actors  # aus CombatDialog
+        self.initiatives = {}  # instance_id → total_initiative
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("<b>Würfe für Initiative:</b>"))
+        layout.addWidget(QLabel("Für jeden Kämpfer 1W10 (0 = 10) + Handeln + Bonus/Malus"))
+
+        self.form_layout = QFormLayout()
+        self.inputs = {}
+
+        for actor in self.battle_actors:
+            row = QWidget()
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 0, 0, 0)
+
+            roll_input = QLineEdit()
+            roll_input.setPlaceholderText("Wurf (1-10 oder 0=10)")
+            bonus_input = QLineEdit()
+            bonus_input.setPlaceholderText("Bonus/Malus")
+
+            h.addWidget(QLabel(actor["display_name"]))
+            h.addWidget(roll_input)
+            h.addWidget(bonus_input)
+            self.inputs[actor["instance_id"]] = {
+                "roll": roll_input,
+                "bonus": bonus_input
+            }
+            self.form_layout.addRow(row)
+
+        layout.addLayout(self.form_layout)
+
+        self.calc_button = QPushButton("Initiative berechnen")
+        self.calc_button.clicked.connect(self.calculate_initiative)
+        layout.addWidget(self.calc_button)
+
+        # Button-Leiste unten
+        btn_layout = QHBoxLayout()
+        self.ok_button = QPushButton("OK (Initiative übernehmen)")
+        self.ok_button.setEnabled(False)  # wird erst aktiv nach Berechnung
+        self.ok_button.clicked.connect(self.accept)
+
+        self.cancel_button = QPushButton("Abbrechen")
+        self.cancel_button.clicked.connect(self.reject)
+
+        btn_layout.addWidget(self.ok_button)
+        btn_layout.addWidget(self.cancel_button)
+        layout.addLayout(btn_layout)
+
+
+        self.result_area = QTextEdit()
+        self.result_area.setReadOnly(True)
+        layout.addWidget(self.result_area)
+
+        layout.addStretch()
+
+    def calculate_initiative(self):
+        # 1. Alle Würfe auslesen
+        results = []
+        for actor in self.battle_actors:
+            inst_id = actor["instance_id"]
+            roll_txt = self.inputs[inst_id]["roll"].text().strip()
+            bonus_txt = self.inputs[inst_id]["bonus"].text().strip()
+
+            try:
+                roll_val = int(roll_txt)
+            except ValueError:
+                QMessageBox.warning(self, "Fehler", f"Ungültiger Wurfwert für {actor['display_name']}")
+                return
+
+            # 0 = 10 interpretieren
+            if roll_val == 0:
+                roll_val = 10
+
+            try:
+                bonus_val = int(bonus_txt) if bonus_txt else 0
+            except ValueError:
+                QMessageBox.warning(self, "Fehler", f"Ungültiger Bonus/Malus bei {actor['display_name']}")
+                return
+
+            # Handeln-Wert aus Charakterdaten
+            handeln_value = self.get_handeln_value(actor["source_char_id"])
+
+            total_initiative = roll_val + handeln_value + bonus_val
+
+            results.append({
+                "actor": actor,
+                "roll": roll_val,
+                "bonus": bonus_val,
+                "handeln": handeln_value,
+                "total": total_initiative
+            })
+
+        # 2. Sortierung:
+        #   - Zuerst nach total (desc)
+        #   - Bei Gleichstand: PC vor NPC
+        #   - Dann alphabetisch als Fallback
+        def sort_key(x):
+            role = self.get_character_role(x["actor"]["source_char_id"])
+            return (
+                -x["total"],             # absteigend
+                0 if role == "pc" else 1, # pc zuerst
+                x["actor"]["display_name"].lower()
+            )
+
+        results.sort(key=sort_key)
+
+        # 3. Ergebnis anzeigen
+        text = "<b>Initiative-Reihenfolge:</b><br><br>"
+        for idx, r in enumerate(results, start=1):
+            role = self.get_character_role(r["actor"]["source_char_id"])
+            role_display = "PC" if role == "pc" else "NSC"
+            text += (
+                f"{idx}. {r['actor']['display_name']} "
+                f"({role_display}) → Wurf {r['roll']} + Handeln {r['handeln']} "
+                f"+ Bonus {r['bonus']} = <b>{r['total']}</b><br>"
+            )
+
+        self.result_area.setHtml(text)
+        # Speichere Reihenfolge für Rückgabe
+        self.sorted_results = results
+        self.ok_button.setEnabled(True)
+
+
+    def get_sorted_initiative(self):
+        """Gibt die berechnete Reihenfolge zurück"""
+        if hasattr(self, "sorted_results"):
+            return self.sorted_results
+        return []
+
+
+    def get_handeln_value(self, char_id):
+        """Lädt den Charakter und berechnet den aktuellen Handeln-Wert"""
+        char_file = None
+        folder = "characters"
+        if not os.path.exists(folder):
+            return 0
+        for fname in os.listdir(folder):
+            if not fname.lower().endswith(".json"):
+                continue
+            full_path = os.path.join(folder, fname)
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("id") == char_id:
+                        char_file = data
+                        break
+            except Exception:
+                continue
+
+        if not char_file:
+            return 0
+
+        # Berechne Handeln-Wert wie im Charakterdialog
+        skills = char_file.get("skills", {})
+        handeln_skills = skills.get("Handeln", {})
+        if not handeln_skills:
+            return 0
+
+        total = sum(int(v) for v in handeln_skills.values() if str(v).isdigit())
+        return kaufmaennisch_runden(total / 10)
+
+    def get_character_role(self, char_id):
+        """Liest aus dem gespeicherten Charakter, ob es ein PC oder NSC ist"""
+        folder = "characters"
+        if not os.path.exists(folder):
+            return "npc"
+        for fname in os.listdir(folder):
+            if not fname.lower().endswith(".json"):
+                continue
+            full_path = os.path.join(folder, fname)
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("id") == char_id:
+                        return data.get("role", "npc")
+            except Exception:
+                continue
+        return "npc"
 
 
 
