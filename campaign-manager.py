@@ -77,6 +77,18 @@ class ItemEditorDialog(QDialog):
         form_layout.addRow("Beschreibung:", self.description_input)
         main_layout.addLayout(form_layout)
 
+        # Waffen-Option
+        self.is_weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
+        self.is_weapon_checkbox.stateChanged.connect(self.toggle_weapon_fields)
+        form_layout.addRow("", self.is_weapon_checkbox)
+
+        # Eingabefeld für Schadensformel (nur sichtbar, wenn Waffe)
+        self.damage_formula_input = QLineEdit()
+        self.damage_formula_input.setPlaceholderText("z. B. 1W6+2")
+        self.damage_formula_input.setVisible(False)
+        form_layout.addRow("Schadensformel:", self.damage_formula_input)
+
+
         # Attribute-Bereich
         self.attr_group = QGroupBox("Attribute")
         self.attr_layout_outer = QVBoxLayout()
@@ -124,6 +136,11 @@ class ItemEditorDialog(QDialog):
 
         main_layout.addStretch()
         self.setLayout(main_layout)
+
+    def toggle_weapon_fields(self):
+        """Zeigt oder versteckt die Eingabe für die Schadensformel."""
+        self.damage_formula_input.setVisible(self.is_weapon_checkbox.isChecked())
+
 
     def add_attribute_row(self, preset_name=None, preset_value=None):
         """
@@ -347,6 +364,13 @@ class ItemEditorDialog(QDialog):
 
         self.name_input.setText(item_data.get("name", ""))
         self.description_input.setText(item_data.get("description", ""))
+
+        # Waffen-Checkbox & Schadensformel laden
+        is_weapon = item_data.get("is_weapon", False)
+        self.is_weapon_checkbox.setChecked(is_weapon)
+        self.damage_formula_input.setText(item_data.get("damage_formula", ""))
+        self.damage_formula_input.setVisible(is_weapon)
+
 
         # Zustände / Links laden
         self.linked_conditions = item_data.get("linked_conditions", [])
@@ -781,12 +805,13 @@ class CharacterCreationDialog(QDialog):
         main_layout.addWidget(self.conditions_group)
 
 
-
         self.base_hitpoints = 0
 
-
-
-
+        # Grundschaden (z. B. Faustkampf oder allgemeiner Nahkampfschaden)
+        self.base_damage_input = QLineEdit()
+        self.base_damage_input.setPlaceholderText("z.B. 1W6 oder 1W6+2")
+        main_layout.addWidget(QLabel("Grundschaden:"))
+        main_layout.addWidget(self.base_damage_input)
 
         self.base_values = {
             "Lebenspunkte": 0,
@@ -934,6 +959,7 @@ class CharacterCreationDialog(QDialog):
 
 
     def add_item(self):
+        # 1. Namen abfragen wie bisher
         item_name, ok = QInputDialog.getText(self, "Neues Item", "Item-Name:")
         if not ok or not item_name.strip():
             QMessageBox.warning(self, "Fehler", "Item-Name darf nicht leer sein.")
@@ -943,25 +969,80 @@ class CharacterCreationDialog(QDialog):
             QMessageBox.warning(self, "Fehler", f"Item '{item_name}' existiert bereits.")
             return
 
-        item_group = QGroupBox(item_name)
+        # 2. GroupBox für dieses Item
         item_group = QGroupBox(item_name)
         self.style_groupbox(item_group)
 
         item_layout = QVBoxLayout()
-        self.item_groups[item_name] = {"attributes": {}, "layout": item_layout, "group": item_group}
-        
+
+        # Wir speichern für dieses Item:
+        # - attributes: dict[str,str]
+        # - layout: das VBoxLayout
+        # - group: die QGroupBox
+        # - id: None (neu erzeugtes Item hat noch keine globale Item-ID)
+        # - linked_conditions: [] (erstmal leer)
+        # - is_weapon_checkbox: QCheckBox
+        # - damage_field: QLineEdit
+        self.item_groups[item_name] = {
+            "attributes": {},
+            "layout": item_layout,
+            "group": item_group,
+            "id": None,
+            "linked_conditions": [],
+            "is_weapon_checkbox": None,
+            "damage_field": None,
+        }
+
+        # 3. Attribut-Liste (genau wie vorher)
         attr_layout = QFormLayout()
+        item_layout.addLayout(attr_layout)
+
+        # Wir brauchen Zugriff auf attr_layout später, also speichern wir es auch:
+        self.item_groups[item_name]["attr_layout"] = attr_layout
+
+        # 4. Waffen-spezifischer Bereich
+        weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
+        damage_input = QLineEdit()
+        damage_input.setPlaceholderText("z. B. 1W6+2")
+        damage_row = QHBoxLayout()
+        damage_row.addWidget(QLabel("Schadensformel:"))
+        damage_row.addWidget(damage_input)
+
+        # standardmäßig ausgeblendet, bis Checkbox aktiv
+        damage_input.setVisible(False)
+
+        def on_weapon_toggle(state):
+            damage_input.setVisible(state == Qt.CheckState.Checked.value)
+
+        weapon_checkbox.stateChanged.connect(on_weapon_toggle)
+
+        item_layout.addWidget(weapon_checkbox)
+        item_layout.addLayout(damage_row)
+
+        # Referenzen speichern, damit save_character() drankommt
+        self.item_groups[item_name]["is_weapon_checkbox"] = weapon_checkbox
+        self.item_groups[item_name]["damage_field"] = damage_input
+
+        # 5. Button: neues Attribut hinzufügen (wie vorher)
         add_attr_button = QPushButton("+ Neue Eigenschaft")
         add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
-        item_layout.addLayout(attr_layout)
         item_layout.addWidget(add_attr_button)
 
+        # 6. Entfernen-Button wie vorher
         remove_button = QPushButton("- Item entfernen")
         remove_button.clicked.connect(lambda _, item=item_name: self.remove_item(item))
         item_layout.addWidget(remove_button)
 
+        # 7. In die UI einhängen (vor den beiden globalen Buttons)
         item_group.setLayout(item_layout)
-        self.items_layout.insertWidget(self.items_layout.count() - 1, item_group)
+
+        # In items_layout ist aktuell:
+        #   [ + Neues Item ]
+        #   [ + Item aus Sammlung hinzufügen ]
+        # Wir wollen das neue Item VOR diesen Buttons einfügen.
+        insert_pos = max(0, self.items_layout.count() - 2)
+        self.items_layout.insertWidget(insert_pos, item_group)
+
 
     def add_attribute(self, item_name):
         dialog = AttributeDialog(self)
@@ -1042,7 +1123,12 @@ class CharacterCreationDialog(QDialog):
             "layout": item_layout,
             "group": item_group,
             "id": item_id,
-            "linked_conditions": linked_conditions
+            "linked_conditions": linked_conditions,
+            "is_weapon": chosen_item.get("is_weapon", False),
+            "damage_formula": chosen_item.get("damage_formula", ""),
+            # diese beiden Felder haben Bibliotheks-Items nicht als Widgets:
+            "is_weapon_checkbox": None,
+            "damage_field": None,
         }
 
         attr_layout = QFormLayout()
@@ -1050,6 +1136,10 @@ class CharacterCreationDialog(QDialog):
         for attr_name, attr_value in attributes.items():
             attr_layout.addRow(f"{attr_name}:", QLabel(str(attr_value)))
             self.item_groups[item_name]["attributes"][attr_name] = attr_value
+
+        if chosen_item.get("is_weapon"):
+            dmg = chosen_item.get("damage_formula", "")
+            attr_layout.addRow("Waffe", QLabel(f"Schaden: {dmg}"))
 
         add_attr_button = QPushButton("+ Neue Eigenschaft")
         add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
@@ -1697,8 +1787,7 @@ class CharacterCreationDialog(QDialog):
 
             religion = self.religion_input.text().strip()
             occupation = self.occupation_input.text().strip()
-            if not religion or not occupation:
-                raise ValueError("Religion und Beruf dürfen nicht leer sein.")
+            base_damage = self.base_damage_input.text().strip()
 
             total_used = 0
             skills_data = {}
@@ -1730,11 +1819,35 @@ class CharacterCreationDialog(QDialog):
             # - linked_conditions (falls vorhanden)
             items_data = {}
             for item_name, data in self.item_groups.items():
+                is_weapon = False
+                damage_formula = ""
+
+                # Falls dieses Item im Dialog direkt erstellt wurde,
+                # gibt es die Felder is_weapon_checkbox / damage_field
+                weapon_cb = data.get("is_weapon_checkbox")
+                dmg_field = data.get("damage_field")
+
+                if weapon_cb is not None and dmg_field is not None:
+                    is_weapon = weapon_cb.isChecked()
+                    damage_formula = dmg_field.text().strip() if is_weapon else ""
+                else:
+                    # Falls das Item aus der Bibliothek kam (add_item_from_library),
+                    # liegen die Infos nicht in Widgets, sondern nur implizit in attributes.
+                    # Beim Laden aus der Bibliothek hatten wir:
+                    #   if chosen_item.get("is_weapon"):
+                    #       ...
+                    # Da haben wir's NICHT explizit gespeichert. Holen wir jetzt nach:
+                    is_weapon = bool(data.get("is_weapon", False))
+                    damage_formula = data.get("damage_formula", "")
+
                 items_data[item_name] = {
                     "attributes": data.get("attributes", {}),
-                    "id": data.get("id", None),
+                    "id": data.get("id", None),  # kann None sein für neue Items
                     "linked_conditions": data.get("linked_conditions", []),
+                    "is_weapon": is_weapon,
+                    "damage_formula": damage_formula,
                 }
+
 
             # Zustände sammeln (für Savegame-Kompatibilität)
             # -> wir nehmen ALLE aktiven Zustände aus self.active_condition_by_id
@@ -1773,6 +1886,7 @@ class CharacterCreationDialog(QDialog):
             "gender": self.gender_input.currentText(),
             "age": age,
             "hitpoints": hitpoints,
+            "base_damage": base_damage,
             "build": self.build_input.currentText(),
             "religion": religion,
             "occupation": occupation,
