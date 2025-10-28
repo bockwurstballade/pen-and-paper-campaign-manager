@@ -2748,7 +2748,6 @@ class WelcomeWindow(QMainWindow):
 class CombatDialog(QDialog):
     def __init__(self, parent=None):
         self.surprised_ids = set()
-
         super().__init__(parent)
 
         self.setWindowTitle("Kampf-Übersicht")
@@ -2865,6 +2864,8 @@ class CombatDialog(QDialog):
         self.surprised_ids = getattr(self, "surprised_ids", set())
         self.turn_order = [r["actor"] for r in order]
         self.current_turn_index = 0
+        self.parry_used = {}
+        self.round_damage = {}  # Gesamtschaden pro Charakter in der aktuellen Runde {instance_id: damage}
         self.round_number = 1 
         # Falls noch kein UI-Bereich existiert, erstellen wir ihn
         if not hasattr(self, "turn_area"):
@@ -2910,14 +2911,38 @@ class CombatDialog(QDialog):
 
         current_actor = self.turn_order[self.current_turn_index]
 
+        # --- Tot / Bewusstlosigkeit prüfen und überspringen ---
+        if current_actor.get("dead", False):
+            self.log_message(f"💀 {current_actor['display_name']} ist tot und wird übersprungen.")
+            self.current_turn_index += 1
+            if self.current_turn_index >= len(self.turn_order):
+                self.next_turn()
+            else:
+                self.refresh_turn_display()
+            return
+        elif current_actor.get("unconscious", False):
+            self.log_message(f"⭕ {current_actor['display_name']} ist bewusstlos und setzt in dieser Runde aus.")
+            self.current_turn_index += 1
+            if self.current_turn_index >= len(self.turn_order):
+                self.next_turn()
+            else:
+                self.refresh_turn_display()
+            return  # Wichtig: Zug sofort beenden
+        # --- Ende Bewusstlos-Check ---
+
         # Den eigentlichen Zug durchführen (inkl. Überraschungs-Check)
         self.execute_turn(current_actor)
+
+    def append_battle_log(self, message: str):
+        """Schreibt eine Nachricht in das Kampf-Log-Feld."""
+        if not hasattr(self, "log_box"):
+            return  # falls das Log-Feld noch nicht existiert (z. B. beim Start)
+        self.log_box.append(message)
 
 
     def log_message(self, text):
         """Fügt eine Nachricht in das Kampf-Log ein."""
         self.log_box.append(f"• {text}")
-
 
     def execute_turn(self, actor):
         # 1. Check: ist der Actor in Runde 1 überrascht?
@@ -2952,47 +2977,170 @@ class CombatDialog(QDialog):
         self.log_message(f"{actor_name} greift {target['display_name']} mit {attack_skill} an...")
         success, crit = self.perform_roll(current_actor, attack_skill)
 
-        # Ergebnis auswerten
-        if not success:
-            result_text = "Angriff verfehlt." if not crit else "Kritischer Fehlschlag!"
-            self.log_message(f"❌ {result_text}")
-            return
-
-        # Erfolg
-        result_text = "Treffer!" if not crit else "⚡ Kritischer Treffer!"
-        self.log_message(f"➡️ {result_text}")
-
-        # 🔥 Kritischer Erfolg: keine Parade erlaubt
-        if crit:
-            self.log_message(f"⚠️ {target['display_name']} kann den Angriff aufgrund eines kritischen Erfolgs nicht parieren!")
-            return
-
-        # Wenn kein kritischer Treffer → prüfen, ob Ziel parieren möchte
-        parry_choice = QMessageBox.question(
-            self,
-            "Parade?",
-            f"{target['display_name']} wurde getroffen. Möchte er/sie parieren?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-
-        if parry_choice == QMessageBox.StandardButton.No:
-            self.log_message(f"{target['display_name']} entscheidet sich, nicht zu parieren.")
-            return
-
-        # Parier-Fertigkeit / Kategorie wählen
-        self.log_message(f"{target['display_name']} versucht, den Angriff zu parieren...")
-        parry_skill = self.select_skill_dialog(target)
-        if not parry_skill:
-            return
-
-        parry_success, parry_crit = self.perform_roll(target, parry_skill)
-
-        if parry_success:
-            text = "Parade gelungen!" if not parry_crit else "💥 Kritische Parade!"
-            self.log_message(f"🛡️ {text}")
+         # Erfolg
+        if success: 
+            result_text = "💥Treffer!" if not crit else "⚡💥 Kritischer Treffer!"
+            self.log_message(f"➡️ {result_text}")
         else:
-            text = "Parade misslungen." if not parry_crit else "😬 Kritischer Fehlschlag bei der Parade!"
-            self.log_message(f"❌ {text}")
+            result_text = "🍃Fehlschlag!" if not crit else "⚡🍃 Kritischer Fehlschlag!"
+            self.log_message(f"➡️ {result_text}")
+
+        # Bei kritischem Treffer: keine Parade möglich → direkt Schaden
+        if success and crit:
+            self.log_message(f"⚠️ {target['display_name']} kann den Angriff aufgrund eines kritischen Erfolgs nicht parieren!")
+            self.calculate_damage(current_actor, target)
+            return
+
+        if success and not crit:
+            # Normale Treffer: Ziel kann parieren
+            # --- Einmal pro Runde Parry-Check ---
+            target_id = target["instance_id"]
+            if self.parry_used.get(target_id, False):
+                self.log_message(f"⚠️ {target['display_name']} hat in dieser Runde bereits pariert und kann nicht erneut parieren.")
+                self.calculate_damage(current_actor, target)
+                return
+
+        if success:
+            parry_choice = QMessageBox.question(
+                self,
+                "Parade?",
+                f"{target['display_name']} wurde getroffen. Möchte er/sie parieren?\n(Hinweis: Nur 1x pro Runde möglich)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+
+            if parry_choice == QMessageBox.StandardButton.No:
+                self.log_message(f"{target['display_name']} entscheidet sich, nicht zu parieren.")
+                self.calculate_damage(current_actor, target)
+                return
+
+            # Markiere: hat pariert
+            self.parry_used[target_id] = True
+
+            if parry_choice == QMessageBox.StandardButton.No:
+                self.log_message(f"{target['display_name']} entscheidet sich, nicht zu parieren.")
+                self.calculate_damage(current_actor, target)
+                return
+
+            # Ziel versucht zu parieren
+            self.log_message(f"{target['display_name']} versucht, den Angriff zu parieren...")
+            parry_skill = self.select_skill_dialog(target)
+            if not parry_skill:
+                return
+
+            parry_success, parry_crit = self.perform_roll(target, parry_skill)
+
+            if parry_success:
+                text = "Parade gelungen!" if not parry_crit else "💥 Kritische Parade!"
+                self.log_message(f"🛡️ {text}")
+            else:
+                text = "Parade misslungen." if not parry_crit else "😬 Kritischer Fehlschlag bei der Parade!"
+                self.log_message(f"❌ {text}")
+                self.calculate_damage(current_actor, target)  # Schaden bei misslungener Parade
+
+    def calculate_damage(self, attacker, target):
+        """Berechnet Schaden nach einem erfolgreichen Treffer."""
+        attacker_name = attacker["display_name"]
+        target_name = target["display_name"]
+
+        char_data = self.load_character_data(attacker["source_char_id"])
+        base_damage = char_data.get("base_damage", "1W6")
+
+        # Waffen im Inventar mit is_weapon=True
+        weapons = []
+        items_dict = char_data.get("items", {})
+        for iname, item_data in items_dict.items():
+            if isinstance(item_data, dict) and item_data.get("is_weapon"):
+                formula = item_data.get("damage_formula", "")
+                weapons.append((iname, formula))
+
+        # Auswahlmöglichkeiten
+        options = [f"Basis-Schaden ({base_damage})"] + [
+            f"{iname} ({formel})" for iname, formel in weapons
+        ]
+
+        # Waffe oder Basis-Schaden auswählen
+        weapon_choice, ok = QInputDialog.getItem(
+            self, "Waffe wählen", f"Womit greift {attacker_name} an?", options, 0, False
+        )
+        if not ok:
+            self.log_message(f"{attacker_name} bricht den Angriff ab.")
+            return
+
+        # Schadensformel bestimmen
+        if weapon_choice.startswith("Basis-Schaden"):
+            damage_formula = base_damage
+            weapon_name = "Basis-Schaden"
+        else:
+            weapon_name = weapon_choice.split(" (")[0]
+            damage_formula = dict(weapons).get(weapon_name, base_damage)
+
+        # Würfelwurf eingeben
+        roll_txt, ok = QInputDialog.getText(self, "Schadenswurf", f"Was wurde für {damage_formula} gewürfelt?")
+        if not ok:
+            return
+
+        try:
+            rolled_val = int(roll_txt.strip())
+        except ValueError:
+            QMessageBox.warning(self, "Fehler", "Ungültige Eingabe für Wurf.")
+            return
+
+        # Optionaler Bonus/Malus
+        bonus_txt, ok = QInputDialog.getText(
+            self, "Bonus/Malus", "Bonus oder Malus auf den Schaden? (z. B. +3 oder -2)"
+        )
+        if not ok:
+            bonus_txt = "0"
+        try:
+            bonus_val = int(bonus_txt.strip())
+        except ValueError:
+            bonus_val = 0
+
+        # Fixer Bonus aus Formel extrahieren, z. B. 2W10+5
+        fixed_bonus = 0
+        if "+" in damage_formula:
+            try:
+                bonus_part = damage_formula.split("+")[1].strip()
+                # Nur die Zahl vor einem möglichen Leerzeichen oder Buchstaben nehmen
+                fixed_bonus = int(''.join(filter(str.isdigit, bonus_part.split()[0])))
+            except (ValueError, IndexError):
+                self.log_message(f"Warnung: Ungültiger Bonus in Schadensformel '{damage_formula}' – wird ignoriert.")
+                fixed_bonus = 0
+
+        total_damage = rolled_val + fixed_bonus + bonus_val
+
+        # Schaden anwenden
+        target["current_hp"] = max(0, target["current_hp"] - total_damage)
+        # --- Bewusstlosigkeits-Prüfung ---
+        target_id = target["instance_id"]
+
+        # 1. Runden-Schaden tracken
+        if target_id not in self.round_damage:
+            self.round_damage[target_id] = 0
+        self.round_damage[target_id] += total_damage
+
+        # 2. Bewusstlos, wenn HP < 10 ODER Runden-Schaden > 60
+        if (0 < target["current_hp"] < 10) or (self.round_damage[target_id] > 60):
+            target["unconscious"] = True
+            self.log_message(
+                f"⚠️ {target_name} ist bewusstlos! "
+                f"(HP: {target['current_hp']}, Runden-Schaden: {self.round_damage[target_id]})"
+            )
+
+        # Neu: Tot-Prüfung (nach Bewusstlos, falls HP <= 0)
+        if target["current_hp"] <= 0:
+            target["dead"] = True
+            target["unconscious"] = True  # Tot impliziert auch bewusstlos
+            self.log_message(f"💀 {target_name} ist tot! (HP: {target['current_hp']})")
+
+        self.refresh_actor_list()
+
+        # Log-Eintrag
+        self.log_message(
+            f"{attacker_name} verursacht {total_damage} Schaden an {target_name} "
+            f"({weapon_name}, {damage_formula}, Wurf: {rolled_val}, Bonus: {bonus_val}). "
+            f"{target_name} hat jetzt {target['current_hp']} / {target['max_hp']} HP."
+        )
 
 
     def select_skill_dialog(self, actor):
@@ -3130,24 +3278,34 @@ class CombatDialog(QDialog):
             f"<b>Aktuell am Zug:</b> {current_actor['display_name']} ({current_actor['team']})"
         )
 
-        # gesamte Reihenfolge anzeigen (inkl. Überraschungs-Markierung)
+        # gesamte Reihenfolge anzeigen
         text = ""
         for i, actor in enumerate(self.turn_order, start=1):
-            prefix = "➡️ " if i - 1 == self.current_turn_index else ""
-            surprised = actor["instance_id"] in getattr(self, "surprised_ids", set())
-            surprise_icon = " 😮" if surprised else ""
-            surprise_style = (
-                'style="color:gray; font-style:italic;"'
-                if surprised and self.round_number == 1
-                else ""
-            )
-            skip_note = (
-                " (setzt in Runde 1 aus)" if surprised and self.round_number == 1 else ""
-            )
+            # --- Status bestimmen (Hierarchie: Tot > Bewusstlos > Überrascht) ---
+            status_icon = ""
+            status_style = ""
+            skip_note = ""
+
+            if actor.get("dead", False):
+                status_icon = " [TOT]"
+                status_style = 'style="color:red; font-weight:bold;"'
+            elif actor.get("unconscious", False):
+                status_icon = " [BEWUSSTLOS]"
+                status_style = 'style="color:orange; font-style:italic;"'
+                skip_note = " (setzt aus)" if not actor.get("dead", False) else ""
+            elif actor["instance_id"] in getattr(self, "surprised_ids", set()):
+                status_icon = " [ÜBERRASCHT]"
+                status_style = 'style="color:gray; font-style:italic;"'
+                skip_note = " (setzt in Runde 1 aus)" if self.round_number == 1 else ""
+            else:
+                status_style = ""
+
+            # Aktueller Zug fett
+            prefix = " " if i - 1 == self.current_turn_index else ""
 
             text += (
                 f'{prefix}{i}. '
-                f'<span {surprise_style}>{actor["display_name"]}{surprise_icon} ({actor["team"]}){skip_note}</span><br>'
+                f'<span {status_style}>{actor["display_name"]}{status_icon} ({actor["team"]}){skip_note}</span><br>'
             )
 
         self.order_list_widget.setHtml(text)
@@ -3185,7 +3343,9 @@ class CombatDialog(QDialog):
         self.refresh_turn_display()
 
     def reset_round(self):
+        # WICHTIG: Parry-Tracking pro Runde zurücksetzen
         self.parry_used = {}
+        self.round_damage = {}  # Gesamtschaden pro Charakter in der aktuellen Runde {instance_id: damage}
         if not hasattr(self, "turn_order") or not self.turn_order:
             return
         self.current_turn_index = 0
@@ -3265,6 +3425,8 @@ class CombatDialog(QDialog):
                 "team": team_name,
                 "current_hp": max_hp,
                 "max_hp": max_hp,
+                "unconscious": False, # Bewusstlos-Status
+                "dead": False,  # Neu: Tot-Status
             }
             self.battle_actors.append(actor)
 
