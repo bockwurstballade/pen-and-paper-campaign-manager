@@ -11,6 +11,39 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from decimal import Decimal, ROUND_HALF_UP
 
+def load_all_characters_from_folder():
+    """
+    Liest alle gespeicherten Charaktere aus dem Ordner 'characters'
+    und gibt eine Liste von Dicts zurück: 
+    [ { "data": <char_dict>, "path": <pfad>, "display": <anzeigetext> }, ... ]
+    """
+    chars = []
+    if not os.path.exists("characters"):
+        return chars
+
+    for fname in os.listdir("characters"):
+        if fname.lower().endswith(".json"):
+            full_path = os.path.join("characters", fname)
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+
+                char_name = data.get("name", "(unbenannt)")
+                char_class = data.get("class", "?")
+                char_age = data.get("age", "?")
+                char_id = data.get("id", "???")
+                display = f"{char_name} | {char_class}, {char_age} Jahre [{char_id[:8]}...]"
+
+                chars.append({
+                    "data": data,
+                    "path": full_path,
+                    "display": display,
+                })
+            except Exception:
+                pass
+    return chars
+
+
 def kaufmaennisch_runden(x):
     """Rundet nach kaufmännischer Regel: ab 0.5 wird aufgerundet."""
     return int(Decimal(str(round(x, 3))).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
@@ -1908,6 +1941,355 @@ class CharacterCreationDialog(QDialog):
         # Skills / Endwerte aktualisieren
         self.update_points()
 
+class DiceRollDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Würfelprobe")
+        self.setGeometry(300, 300, 400, 300)
+
+        self.characters = load_all_characters_from_folder()
+        self.current_char = None  # dict mit allen Daten des ausgewählten Charakters
+        self.char_effective = None  # vorberechnete Strukturen (siehe unten)
+
+        # Widgets
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+
+        # 1) Charakter-Auswahl
+        self.char_select = QComboBox()
+        if self.characters:
+            for c in self.characters:
+                self.char_select.addItem(c["display"])
+        else:
+            self.char_select.addItem("<<kein Charakter gefunden>>")
+        self.char_select.currentIndexChanged.connect(self.on_character_changed)
+        form.addRow("Charakter:", self.char_select)
+
+        # 2) Fertigkeit / Kategorie Auswahl
+        self.skill_select = QComboBox()
+        self.skill_select.currentIndexChanged.connect(self.on_skill_changed)
+        form.addRow("Fertigkeit / Kategorie:", self.skill_select)
+
+        # 3) Endwert-Anzeige (read only)
+        self.endwert_display = QLineEdit()
+        self.endwert_display.setReadOnly(True)
+        form.addRow("Endwert:", self.endwert_display)
+
+        # 4) Bonus/Malus Eingabe (Erleichtern um ...)
+        self.bonus_input = QLineEdit()
+        self.bonus_input.setPlaceholderText("z. B. 5 oder -10")
+        self.bonus_input.textChanged.connect(self.update_effective_target_value)
+        form.addRow("Erleichtern um:", self.bonus_input)
+
+        # 5) Wurf-Ergebnis Eingabe (1-100)
+        self.roll_input = QLineEdit()
+        self.roll_input.setPlaceholderText("z. B. 42 oder 100")
+        form.addRow("Gewürfelter Wert:", self.roll_input)
+
+        layout.addLayout(form)
+
+        # Ergebnisfeld
+        self.result_label = QLabel("")
+        self.result_label.setWordWrap(True)
+        layout.addWidget(self.result_label)
+
+        # Button "Auswerten"
+        self.eval_button = QPushButton("Auswerten")
+        self.eval_button.clicked.connect(self.evaluate_roll)
+        layout.addWidget(self.eval_button)
+
+        layout.addStretch()
+
+        # Initial: ersten Charakter laden (falls vorhanden)
+        if self.characters:
+            self.on_character_changed(0)
+
+    # --- Hilfslogik zur Charakterberechnung ---
+
+    def compute_effective_values_for_character(self, char_data):
+        """
+        Liefert ein Dict mit:
+         {
+           "categories": {cat: effective_cat_value, ...},
+           "skills": {skill: effective_skill_value, ...}
+         }
+        Zustände ('missionsweit') werden eingerechnet.
+        """
+
+        # 1. Basiswerte sammeln (aus gespeichertem Charakter)
+        #    -> base_skill_values[skill], base_category_base[cat]
+        base_skill_values = {}
+        base_category_sum = {}   # cat -> sum der rohen skill-werte
+        base_category_values = {}  # cat -> kaufmännisch gerundet(sum/10)
+
+        skills_by_cat = char_data.get("skills", {})
+        for cat, skillmap in skills_by_cat.items():
+            total = 0
+            for skill, val in skillmap.items():
+                try:
+                    val_int = int(val)
+                except:
+                    val_int = 0
+                base_skill_values[skill] = val_int
+                total += val_int
+            # Kategorie-Basiswert wie im Editor: kaufmännisch_runden(total/10)
+            base_category_values[cat] = kaufmaennisch_runden(total / 10)
+            base_category_sum[cat] = total  # nur falls wir's mal brauchen später
+
+        # 2. Zustands-Modifikatoren sammeln
+        #    Wir schauen NUR auf effect_type == "missionsweit"
+        skill_mods = {}
+        category_mods = {}
+
+        conds = char_data.get("conditions", {})
+        for cond_name, cond in conds.items():
+            if cond.get("effect_type") != "missionsweit":
+                continue
+
+            target = cond.get("effect_target", "")
+            val = cond.get("effect_value", 0)
+            try:
+                val = int(val)
+            except:
+                val = 0
+
+            # Fertigkeit: XYZ
+            if target.startswith("Fertigkeit: "):
+                skill_name = target.replace("Fertigkeit: ", "", 1).strip()
+                skill_mods[skill_name] = skill_mods.get(skill_name, 0) + val
+
+            # Kategoriewert: XYZ
+            elif target.startswith("Kategoriewert: "):
+                cat_name = target.replace("Kategoriewert: ", "", 1).strip()
+                category_mods[cat_name] = category_mods.get(cat_name, 0) + val
+
+            # Hinweis: Geistesblitzpunkte buffen wir fürs Würfeln erstmal nicht separat,
+            # da du gesagt hast, wir können auf Kategorien/Skills würfeln.
+            # Falls du später auch direkte Geistesblitzpunkte-Würfe willst,
+            # müssten wir die hier berücksichtigen.
+
+        # 3. effektive Kategorien anwenden
+        effective_categories = {}
+        for cat, base_val in base_category_values.items():
+            effective_categories[cat] = base_val + category_mods.get(cat, 0)
+
+        # 4. effektive Skills:
+        #    effektiver Skillwert = Basis Skill + Skill-Mods + effektiver Kategorienwert (der Kategorie, zu der der Skill gehört)
+        effective_skills = {}
+        for cat, skillmap in skills_by_cat.items():
+            cat_val_effective = effective_categories.get(cat, 0)
+            for skill, val in skillmap.items():
+                base_val = base_skill_values.get(skill, 0)
+                mod_val = skill_mods.get(skill, 0)
+                effective_skills[skill] = base_val + mod_val + cat_val_effective
+
+        return {
+            "categories": effective_categories,
+            "skills": effective_skills,
+        }
+
+    # --- UI-Callbacks ---
+
+    def on_character_changed(self, index):
+        """Wird gerufen, wenn im DropDown ein anderer Charakter gewählt wurde."""
+        if not self.characters:
+            self.current_char = None
+            self.skill_select.clear()
+            self.endwert_display.setText("")
+            return
+
+        chosen = self.characters[index]
+        self.current_char = chosen["data"]
+
+        # effektive Werte vorberechnen
+        self.char_effective = self.compute_effective_values_for_character(self.current_char)
+
+        # Skill-Liste neu aufbauen
+        # Wir bieten zuerst Kategorien, dann einen Trenner, dann Skills
+        self.skill_select.blockSignals(True)
+        self.skill_select.clear()
+
+        # Kategorien
+        for cat_name in self.char_effective["categories"].keys():
+            self.skill_select.addItem(f"[Kategorie] {cat_name}")
+
+        # Trenner (optional; nur wenn es beides gibt)
+        if self.char_effective["categories"] and self.char_effective["skills"]:
+            self.skill_select.addItem("----------")
+
+        # Skills
+        for skill_name in self.char_effective["skills"].keys():
+            self.skill_select.addItem(skill_name)
+
+        self.skill_select.blockSignals(False)
+
+        # direkt erste sinnvolle Auswahl setzen
+        if self.skill_select.count() > 0:
+            self.skill_select.setCurrentIndex(0)
+            self.on_skill_changed(0)
+        else:
+            self.endwert_display.setText("")
+
+    def on_skill_changed(self, index):
+        """Immer wenn eine andere Fertigkeit/Kategorie gewählt wird -> Endwert neu anzeigen."""
+        self.update_endwert_display()
+        self.update_effective_target_value()
+
+    def current_selected_value(self):
+        """
+        Ermittelt den reinen Endwert (ohne 'Erleichtern um') für die aktuell
+        ausgewählte Zeile der Combobox.
+        """
+        if not self.char_effective or self.skill_select.count() == 0:
+            return 0
+
+        sel = self.skill_select.currentText().strip()
+
+        if sel.startswith("[Kategorie] "):
+            cat_name = sel.replace("[Kategorie] ", "", 1)
+            return self.char_effective["categories"].get(cat_name, 0)
+
+        if sel == "----------":
+            return 0
+
+        # sonst ist es ein Skill
+        return self.char_effective["skills"].get(sel, 0)
+
+    def update_endwert_display(self):
+        """
+        Zeigt den 'Endwert' (also Chance %) ohne Bonus/Malus im readonly Feld.
+        """
+        base_val = self.current_selected_value()
+        self.endwert_display.setText(str(base_val))
+
+    def update_effective_target_value(self):
+        """
+        Diese Funktion könntest du benutzen, falls du live irgendwo anzeigen willst:
+        'Effektive Zielchance nach Erleichterung'.
+        Gerade schreiben wir sie nur, damit der Wert da ist, bevor evaluate_roll ruft.
+        """
+        # nothing to update live in UI (optional field if du's anzeigen willst)
+        pass
+
+    # --- Auswertung der Probe ---
+
+    def evaluate_roll(self):
+        """
+        Liest:
+          - Endwert (mit Zuständen usw.)
+          - Bonus/Malus ("Erleichtern um")
+          - Gewürfelte Zahl
+        und bestimmt Erfolg + kritisch? + kritisch gut/schlecht?
+        """
+
+        # 1) Grundchance
+        base_chance = self.current_selected_value()
+
+        # 2) Bonus/Malus
+        bonus_txt = self.bonus_input.text().strip()
+        if bonus_txt == "":
+            bonus_val = 0
+        else:
+            try:
+                bonus_val = int(bonus_txt)
+            except ValueError:
+                QMessageBox.warning(self, "Fehler", "Bitte eine ganze Zahl bei 'Erleichtern um' eingeben (z. B. 5 oder -10).")
+                return
+
+        final_chance = base_chance + bonus_val
+        # clamp sinnvoll? In HTBAH kann man auch theoretisch über 100 kommen (= auto success?),
+        # das Regelwerk lässt Spielleiter*innen da Freiheit. Wir clampen NICHT hart, aber für
+        # die kritische Auswertung brauchen wir den effektiven Fähigkeitswert zwischen 0 und 100.
+        # Für die Krit-Bereiche verwenden wir eine geclampte Variante:
+        crit_basis = max(0, min(100, final_chance))
+
+        # 3) Wurf lesen
+        roll_txt = self.roll_input.text().strip()
+        try:
+            roll_val = int(roll_txt)
+        except ValueError:
+            QMessageBox.warning(self, "Fehler", "Bitte das tatsächliche Würfelergebnis (1-100) als ganze Zahl eingeben.")
+            return
+
+        # Spezialfall: 0 ("0 + 00" auf den Würfeln) ist das gleiche wie 100 (kritischer Fehlschlag)
+        if roll_val == 0:
+            roll_val = 100
+
+        if not (1 <= roll_val <= 100):
+            QMessageBox.warning(self, "Fehler", "Würfelwert muss zwischen 1 und 100 liegen (0 zählt als 100).")
+            return
+
+        # 4) Erfolg / Fehlschlag bestimmen
+        # Erfolg, wenn roll <= final_chance
+        is_success = (roll_val <= final_chance)
+
+        # 5) Kritisch?
+        # laut Regel:
+        # - kritischer Erfolg:
+        #   * immer bei 1
+        #   * oder innerhalb der ersten 10% des Fähigkeitswertes
+        #     -> wenn Fähigkeitswert=70 => 7% => 1..7
+        # - kritischer Fehlschlag:
+        #   * immer bei 100
+        #   * oder innerhalb der letzten 10% der "Unfähigkeit"
+        #     Unfähigkeit = 100 - Fähigkeitswert
+        #     Bei 70 => Unfähigkeit=30 => 3% kritisch => 97..100
+        #
+        # WICHTIG: Diese Grenzen berechnen wir mit crit_basis (geclampter final_chance 0..100)
+
+        ability = crit_basis
+        inability = 100 - ability
+
+        crit_success_threshold = max(1, kaufmaennisch_runden(ability / 10)) # z.B. 70 -> 7
+        crit_fail_threshold = max(1, kaufmaennisch_runden(inability / 10))  # z.B. 30 -> 3
+
+        # Bereiche:
+        # krit. Erfolg: 1 .. crit_success_threshold
+        crit_success_low = 1
+        crit_success_high = crit_success_threshold
+
+        # krit. Fehlschlag: 100-crit_fail_threshold+1 .. 100
+        crit_fail_low = 100 - crit_fail_threshold + 1
+        crit_fail_high = 100
+
+        # Immer-Sonderregeln
+        if roll_val == 1:
+            is_crit_success = True
+        else:
+            is_crit_success = (roll_val >= crit_success_low and roll_val <= crit_success_high)
+
+        if roll_val == 100:
+            is_crit_fail = True
+        else:
+            is_crit_fail = (roll_val >= crit_fail_low and roll_val <= crit_fail_high)
+
+        # Falls er gleichzeitig in beiden kritischen Bereichen liegen könnte (extreme Modifikatoren),
+        # geben wir harte Regeln Vorrang:
+        # 1 hat immer Vorrang als krit. Erfolg
+        # 100 hat immer Vorrang als krit. Fehlschlag
+        # Sonst sollten sich die Bereiche eh nicht überlappen.
+
+        # 6) Ergebnis-Text bauen
+        if is_success:
+            outcome_text = "Erfolg"
+        else:
+            outcome_text = "Fehlschlag"
+
+        if is_crit_success:
+            outcome_text = "KRITISCHER ERFOLG ✅ (" + outcome_text + ")"
+        elif is_crit_fail:
+            outcome_text = "KRITISCHER FEHLSCHLAG ❌ (" + outcome_text + ")"
+
+        # Noch ein paar Debug-Infos, damit der SL alles sieht
+        details = (
+            f"Grundchance: {base_chance}  |  Modifikator: {bonus_val:+}  "
+            f"→ Zielwert: {final_chance}\n"
+            f"Wurf: {roll_val}\n"
+        )
+
+        self.result_label.setText(outcome_text + "\n\n" + details)
+
 class WelcomeWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1950,6 +2332,10 @@ class WelcomeWindow(QMainWindow):
         load_condition_button = QPushButton("Bestehenden Zustand laden", self)
         load_condition_button.clicked.connect(self.load_condition)
         layout.addWidget(load_condition_button)
+
+        roll_button = QPushButton("Würfelprobe", self)
+        roll_button.clicked.connect(self.open_roll_dialog)
+        layout.addWidget(roll_button)
 
 
         layout.addStretch()
@@ -2069,6 +2455,10 @@ class WelcomeWindow(QMainWindow):
         dlg = ItemEditorDialog(self)
         # Neue UUID direkt setzen, damit beim Speichern klar ist, wer das ist
         dlg.item_id = str(uuid.uuid4())
+        dlg.exec()
+
+    def open_roll_dialog(self):
+        dlg = DiceRollDialog(self)
         dlg.exec()
 
     def load_item(self):
