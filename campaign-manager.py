@@ -5,8 +5,9 @@ import uuid
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox
+    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
 )
+from random import randint
 
 
 from PyQt6.QtCore import Qt
@@ -2660,6 +2661,26 @@ class CombatDialog(QDialog):
         self.start_battle_button.clicked.connect(self.start_battle)
         right_layout.addWidget(self.start_battle_button)
 
+    def load_character_data(self, char_id):
+        """Hilfsfunktion: Lädt Charakterdaten aus ./characters anhand der ID."""
+        folder = "characters"
+        if not os.path.exists(folder):
+            return None
+
+        for fname in os.listdir(folder):
+            if not fname.lower().endswith(".json"):
+                continue
+            full_path = os.path.join(folder, fname)
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if data.get("id") == char_id:
+                        return data
+            except Exception:
+                continue
+
+        return None
+
     def set_surprise_round(self):
         """Öffnet den Dialog, um überrascht markierte Kämpfer zu wählen"""
         if not self.battle_actors:
@@ -2696,9 +2717,10 @@ class CombatDialog(QDialog):
 
     def set_initiative_order(self, order):
         """Speichert die Reihenfolge und zeigt sie im CombatDialog an"""
+        self.surprised_ids = getattr(self, "surprised_ids", set())
         self.turn_order = [r["actor"] for r in order]
         self.current_turn_index = 0
-
+        self.round_number = 1 
         # Falls noch kein UI-Bereich existiert, erstellen wir ihn
         if not hasattr(self, "turn_area"):
             self.turn_area = QVBoxLayout()
@@ -2720,40 +2742,305 @@ class CombatDialog(QDialog):
             self.reset_round_btn.clicked.connect(self.reset_round)
             btns.addWidget(self.reset_round_btn)
 
+            self.action_btn = QPushButton("⚔️ Zug ausführen")
+            self.action_btn.clicked.connect(self.run_current_turn)
+            btns.addWidget(self.action_btn)
+
             self.turn_area.addLayout(btns)
 
             # Füge das unten an (z. B. unter den Teilnehmern)
             self.layout().addLayout(self.turn_area)
 
+        # Kampf-Log (Nachrichtenfeld)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setPlaceholderText("Kampf-Log...")
+        self.layout().addWidget(self.log_box)
         self.refresh_turn_display()
+
+    def run_current_turn(self):
+        """Führt den Zug des aktuell an der Reihe befindlichen Kämpfers aus."""
+        if not hasattr(self, "turn_order") or not self.turn_order:
+            return
+
+        current_actor = self.turn_order[self.current_turn_index]
+
+        # Den eigentlichen Zug durchführen (inkl. Überraschungs-Check)
+        self.execute_turn(current_actor)
+
+
+    def log_message(self, text):
+        """Fügt eine Nachricht in das Kampf-Log ein."""
+        self.log_box.append(f"• {text}")
+
+
+    def execute_turn(self, actor):
+        # 1. Check: ist der Actor in Runde 1 überrascht?
+        if self.is_actor_surprised_and_blocked(actor):
+            self.log_message(
+                f"{actor['display_name']} ist überrascht und setzt in Runde {self.round_number} aus."
+            )
+            return
+
+        current_actor = self.turn_order[self.current_turn_index]
+        actor_name = current_actor["display_name"]
+
+        # Ziel wählen
+        targets = [a for a in self.battle_actors if a["instance_id"] != current_actor["instance_id"]]
+        if not targets:
+            QMessageBox.information(self, "Hinweis", "Keine Ziele verfügbar.")
+            return
+
+        target_names = [t["display_name"] for t in targets]
+        target_choice, ok = QInputDialog.getItem(self, "Ziel wählen", f"{actor_name} greift an:", target_names, 0, False)
+        if not ok:
+            return
+
+        target = next(t for t in targets if t["display_name"] == target_choice)
+
+        # Fertigkeit / Kategorie wählen
+        attack_skill = self.select_skill_dialog(current_actor)
+        if not attack_skill:
+            return
+
+        # Angriffswurf
+        self.log_message(f"{actor_name} greift {target['display_name']} mit {attack_skill} an...")
+        success, crit = self.perform_roll(current_actor, attack_skill)
+
+        # Ergebnis auswerten
+        if not success:
+            result_text = "Angriff verfehlt." if not crit else "Kritischer Fehlschlag!"
+            self.log_message(f"❌ {result_text}")
+            return
+
+        # Erfolg
+        result_text = "Treffer!" if not crit else "⚡ Kritischer Treffer!"
+        self.log_message(f"➡️ {result_text}")
+
+        # 🔥 Kritischer Erfolg: keine Parade erlaubt
+        if crit:
+            self.log_message(f"⚠️ {target['display_name']} kann den Angriff aufgrund eines kritischen Erfolgs nicht parieren!")
+            return
+
+        # Wenn kein kritischer Treffer → prüfen, ob Ziel parieren möchte
+        parry_choice = QMessageBox.question(
+            self,
+            "Parade?",
+            f"{target['display_name']} wurde getroffen. Möchte er/sie parieren?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+
+        if parry_choice == QMessageBox.StandardButton.No:
+            self.log_message(f"{target['display_name']} entscheidet sich, nicht zu parieren.")
+            return
+
+        # Parier-Fertigkeit / Kategorie wählen
+        self.log_message(f"{target['display_name']} versucht, den Angriff zu parieren...")
+        parry_skill = self.select_skill_dialog(target)
+        if not parry_skill:
+            return
+
+        parry_success, parry_crit = self.perform_roll(target, parry_skill)
+
+        if parry_success:
+            text = "Parade gelungen!" if not parry_crit else "💥 Kritische Parade!"
+            self.log_message(f"🛡️ {text}")
+        else:
+            text = "Parade misslungen." if not parry_crit else "😬 Kritischer Fehlschlag bei der Parade!"
+            self.log_message(f"❌ {text}")
+
+
+    def select_skill_dialog(self, actor):
+        # Lade Charakterdaten
+        char = self.load_character_data(actor["source_char_id"])
+        if not char:
+            QMessageBox.warning(self, "Fehler", "Charakterdaten konnten nicht geladen werden.")
+            return None
+
+        # Fertigkeiten und Kategorien zusammenstellen
+        skill_names = []
+        for cat, skills in char.get("skills", {}).items():
+            skill_names.append(cat)  # Kategorie selbst
+            skill_names.extend(skills.keys())
+
+        choice, ok = QInputDialog.getItem(self, "Fertigkeit wählen", "Angriffs-Fertigkeit:", skill_names, 0, False)
+        return choice if ok else None
+
+    def perform_roll(self, actor, skill_name):
+        """Führt eine manuelle Würfelprobe durch, die der Spielleiter eingibt."""
+        char = self.load_character_data(actor["source_char_id"])
+        if not char:
+            QMessageBox.warning(self, "Fehler", f"Konnte Charakterdaten für {actor['display_name']} nicht laden.")
+            return False, False
+
+        char.setdefault("skills", {})
+        char.setdefault("category_scores", {})
+
+        skills = char["skills"]
+
+        # Prüfen, ob direkt auf eine Kategorie (z. B. "Handeln") gewürfelt wird
+        if skill_name in char["category_scores"]:
+            category = skill_name
+            skill_val = 0
+            category_val = char["category_scores"].get(category, 0)
+        else:
+            # Kategorie anhand der Fertigkeiten suchen
+            category = None
+            for cat, skillset in skills.items():
+                if skill_name in skillset:
+                    category = cat
+                    break
+
+            if category is None:
+                QMessageBox.warning(self, "Fehler", f"Fertigkeit oder Kategorie '{skill_name}' nicht im Charakter gefunden.")
+                return False, False
+
+            skill_val = skills[category].get(skill_name, 0)
+            category_val = char["category_scores"].get(category, 0)
+
+        base_val = skill_val + category_val
+
+        # 🎲 Spielleiter gibt realen Wurf ein
+        roll_str, ok = QInputDialog.getText(
+            self,
+            f"Wurf für {actor['display_name']}",
+            f"Bitte gewürfelten Wurf (1–100) für {skill_name} ({category}) eingeben:"
+        )
+        if not ok:
+            return False, False
+
+        try:
+            roll = int(roll_str)
+            if roll == 0:
+                roll = 100
+            if not 1 <= roll <= 100:
+                raise ValueError()
+        except ValueError:
+            QMessageBox.warning(self, "Fehler", "Ungültiger Wurfwert. Bitte 1–100 eingeben (0 = 100).")
+            return False, False
+
+        # Erfolg / Kritisch prüfen
+        crit = roll in (1, 100)
+        success = roll <= base_val
+
+        # Log-Eintrag
+        if hasattr(self, "log_message"):
+            if skill_val > 0:
+                details = f"Wurf auf {skill_name} ({category})"
+            else:
+                details = f"Wurf auf Kategorie {category}"
+            self.log_message(
+                f"{actor['display_name']} {details}: "
+                f"Wurf={roll}, Zielwert={base_val} → {'✔️ Erfolg' if success else '❌ Fehlschlag'}"
+                + (" (Kritisch!)" if crit else "")
+            )
+
+        return success, crit
+
+
+
+
+    def handle_parry_phase(self, attacker, target):
+        """Ermöglicht dem Ziel, einen Blockversuch zu starten."""
+        # Paradezähler initialisieren
+        if not hasattr(self, "parry_used"):
+            self.parry_used = {}
+
+        target_id = target["instance_id"]
+        if self.parry_used.get(target_id, False):
+            self.log_message(f"{target['display_name']} hat in dieser Runde bereits pariert.")
+            return
+
+        reply = QMessageBox.question(
+            self, "Parade?", f"Soll {target['display_name']} den Angriff parieren?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.No:
+            self.log_message(f"{target['display_name']} versucht nicht zu parieren.")
+            return
+
+        # Parier-Fertigkeit wählen
+        parry_skill = self.select_skill_dialog(target)
+        if not parry_skill:
+            return
+
+        success, crit = self.perform_roll(target, parry_skill)
+        self.parry_used[target_id] = True
+
+        if success:
+            self.log_message(f"🛡️ {target['display_name']} pariert erfolgreich mit {parry_skill}!")
+        else:
+            self.log_message(f"💥 {target['display_name']} verfehlt die Parade!")
+
 
     def refresh_turn_display(self):
         if not hasattr(self, "turn_order") or not self.turn_order:
             return
 
         current_actor = self.turn_order[self.current_turn_index]
+
+        # Kopfzeile mit Rundeninfo
         self.current_turn_label.setText(
+            f"<b>Runde {self.round_number}</b><br>"
             f"<b>Aktuell am Zug:</b> {current_actor['display_name']} ({current_actor['team']})"
         )
 
-        # gesamte Reihenfolge anzeigen
+        # gesamte Reihenfolge anzeigen (inkl. Überraschungs-Markierung)
         text = ""
         for i, actor in enumerate(self.turn_order, start=1):
             prefix = "➡️ " if i - 1 == self.current_turn_index else ""
-            text += f"{prefix}{i}. {actor['display_name']} ({actor['team']})\n"
+            surprised = actor["instance_id"] in getattr(self, "surprised_ids", set())
+            surprise_icon = " 😮" if surprised else ""
+            surprise_style = (
+                'style="color:gray; font-style:italic;"'
+                if surprised and self.round_number == 1
+                else ""
+            )
+            skip_note = (
+                " (setzt in Runde 1 aus)" if surprised and self.round_number == 1 else ""
+            )
 
-        self.order_list_widget.setText(text)
+            text += (
+                f'{prefix}{i}. '
+                f'<span {surprise_style}>{actor["display_name"]}{surprise_icon} ({actor["team"]}){skip_note}</span><br>'
+            )
+
+        self.order_list_widget.setHtml(text)
+
 
     def next_turn(self):
         if not hasattr(self, "turn_order") or not self.turn_order:
             return
-        self.current_turn_index += 1
-        if self.current_turn_index >= len(self.turn_order):
-            QMessageBox.information(self, "Neue Runde", "Alle Kämpfer hatten ihren Zug. Neue Runde beginnt!")
-            self.current_turn_index = 0
+
+        # Endlosschutz – z. B. wenn alle in Runde 1 überrascht wären
+        max_iterations = len(self.turn_order) * 2
+
+        while max_iterations > 0:
+            max_iterations -= 1
+
+            self.current_turn_index += 1
+            if self.current_turn_index >= len(self.turn_order):
+                # Neue Runde starten
+                self.round_number += 1
+                self.current_turn_index = 0
+                QMessageBox.information(self, "Neue Runde", f"Runde {self.round_number} beginnt!")
+
+            current_actor = self.turn_order[self.current_turn_index]
+
+            # Überraschungsregel: In Runde 1 dürfen überraschte Kämpfer nicht handeln
+            if hasattr(self.parent(), "surprised_ids") and self.round_number == 1:
+                if current_actor["instance_id"] in self.parent().surprised_ids:
+                    # Überspringen, Info ins Log
+                    print(f"Übersprungen (überrascht): {current_actor['display_name']}")
+                    continue  # direkt nächsten Kämpfer prüfen
+
+            # Wenn kein Überspringen → regulärer Zug
+            break
+
         self.refresh_turn_display()
 
     def reset_round(self):
+        self.parry_used = {}
         if not hasattr(self, "turn_order") or not self.turn_order:
             return
         self.current_turn_index = 0
@@ -2930,6 +3217,17 @@ class CombatDialog(QDialog):
             box.setLayout(v)
             self.actors_layout.addWidget(box)
 
+    def is_actor_surprised_and_blocked(self, actor):
+        """
+        True genau dann, wenn dieser Actor in DIESER Runde nicht handeln darf.
+        Regel: Runde 1 + Actor ist überrascht -> blockieren.
+        Ab Runde 2 nie blockieren.
+        """
+        return (
+            self.round_number == 1
+            and actor["instance_id"] in self.surprised_ids
+        )
+
 class InitiativeDialog(QDialog):
     def __init__(self, battle_actors, parent=None, surprised_ids=None):
         super().__init__(parent)
@@ -3054,6 +3352,21 @@ class InitiativeDialog(QDialog):
                 f"({role_display}) → Wurf {r['roll']} + Handeln {r['handeln']} "
                 f"+ Bonus {r['bonus']} = <b>{r['total']}</b><br>"
             )
+
+        # Überraschungsinfo hinzufügen (falls vorhanden)
+        if getattr(self.parent(), "surprised_ids", set()):
+            surprised_names = [
+                r["actor"]["display_name"]
+                for r in results
+                if r["actor"]["instance_id"] in self.parent().surprised_ids
+            ]
+            if surprised_names:
+                text += (
+                    "<br><b>Überrascht (setzen in Runde 1 aus):</b><br>"
+                    + ", ".join(surprised_names)
+                    + "<br>"
+                )
+
 
         self.result_area.setHtml(text)
         # Speichere Reihenfolge für Rückgabe
