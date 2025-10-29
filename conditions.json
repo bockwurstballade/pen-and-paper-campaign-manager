@@ -7,6 +7,14 @@
             "effect_type": "keine Auswirkung",
             "effect_target": "",
             "effect_value": 0
+        },
+        {
+            "id": "de703bf1-895c-4b45-9d75-59aa4b8b79aa",
+            "name": "schläfrig",
+            "description": "müdi",
+            "effect_type": "keine Auswirkung",
+            "effect_target": "",
+            "effect_value": 0
         }
     ]
 }

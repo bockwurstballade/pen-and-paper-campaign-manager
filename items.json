@@ -48,6 +48,15 @@
             "linked_conditions": [],
             "is_weapon": false,
             "damage_formula": ""
+        },
+        {
+            "id": "4a3c5a4e-d5e4-404c-a22a-82b30017adfe",
+            "name": "Schuhe",
+            "description": "",
+            "attributes": {},
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": ""
         }
     ]
 }
