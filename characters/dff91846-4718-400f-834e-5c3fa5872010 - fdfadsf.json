@@ -1,0 +1,46 @@
+{
+    "id": "dff91846-4718-400f-834e-5c3fa5872010",
+    "name": "fdfadsf",
+    "class": "",
+    "gender": "Männlich",
+    "age": 42,
+    "hitpoints": 100,
+    "base_damage": "",
+    "build": "",
+    "religion": "",
+    "occupation": "",
+    "marital_status": "Ledig",
+    "skills": {
+        "Handeln": {
+            "Schießen": 70
+        },
+        "Wissen": {},
+        "Soziales": {}
+    },
+    "category_scores": {
+        "Handeln": 7,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "inspiration_points": {
+        "Handeln": 1,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "items": {
+        "37": {
+            "attributes": {},
+            "id": null,
+            "linked_conditions": [],
+            "is_weapon": true,
+            "damage_formula": "7W10",
+            "weapon_category": "Schusswaffe"
+        }
+    },
+    "conditions": {},
+    "description": "",
+    "role": "pc",
+    "armor_enabled": false,
+    "armor_value": null,
+    "armor_condition": null
+}

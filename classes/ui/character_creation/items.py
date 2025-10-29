@@ -79,21 +79,18 @@ class CharacterCreationDialogItems:
         damage_input.setVisible(False)
         weapon_category_label.setVisible(False)
         weapon_category_combo.setVisible(False)
-        # --- Layouts vorbereiten ---
-        damage_row = QHBoxLayout()
-        damage_row.addWidget(QLabel("Schadensformel:"))
-        damage_row.addWidget(damage_input)
 
         weapon_cat_row = QHBoxLayout()
         weapon_cat_row.addWidget(weapon_category_label)
         weapon_cat_row.addWidget(weapon_category_combo)
 
         # 🧠 ERWEITERTE Toggle-Funktion
-        def on_weapon_toggle(state):
+        def on_weapon_toggle(state, dmg_input=damage_input, cat_label=weapon_category_label, cat_combo=weapon_category_combo):
             is_checked = state == Qt.CheckState.Checked.value
-            damage_input.setVisible(is_checked)
-            weapon_category_label.setVisible(is_checked)
-            weapon_category_combo.setVisible(is_checked)
+            dmg_input.setVisible(is_checked)
+            cat_label.setVisible(is_checked)
+            cat_combo.setVisible(is_checked)
+
 
         # Signal verbinden
         weapon_checkbox.stateChanged.connect(on_weapon_toggle)
@@ -133,16 +130,35 @@ class CharacterCreationDialogItems:
         parent = self.parent
         data = parent.item_groups[item_name]
 
+        # 🔧 Waffendaten erfassen
+        is_weapon = False
+        damage_formula = ""
+        weapon_category = None
+
+        weapon_checkbox = data.get("is_weapon_checkbox")
+        damage_field = data.get("damage_field")
+        weapon_category_combo = data.get("weapon_category_combo")
+
+        if weapon_checkbox and weapon_checkbox.isChecked():
+            is_weapon = True
+            if damage_field:
+                damage_formula = damage_field.text().strip()
+            if weapon_category_combo:
+                weapon_category = weapon_category_combo.currentText()
+
+        # 📦 Neues Item-Objekt vorbereiten
         item_obj = {
             "id": str(uuid.uuid4()),
             "name": item_name,
             "description": "",
             "attributes": data.get("attributes", {}),
             "linked_conditions": [],
-            "is_weapon": data["is_weapon_checkbox"].isChecked() if data["is_weapon_checkbox"] else False,
-            "damage_formula": data["damage_field"].text().strip() if data["damage_field"] else ""
+            "is_weapon": is_weapon,
+            "damage_formula": damage_formula,
+            "weapon_category": weapon_category,
         }
 
+        # 🗃️ Vorhandene Items laden
         items_list = []
         if os.path.exists("items.json"):
             try:
@@ -152,11 +168,13 @@ class CharacterCreationDialogItems:
             except Exception:
                 pass
 
+        # Doppelte vermeiden
         for existing in items_list:
             if existing.get("name") == item_name:
                 QMessageBox.information(parent, "Hinweis", f"Item '{item_name}' existiert bereits in items.json.")
                 return
 
+        # Neues Item hinzufügen und speichern
         items_list.append(item_obj)
         with open("items.json", "w", encoding="utf-8") as f:
             json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
@@ -193,6 +211,76 @@ class CharacterCreationDialogItems:
             item_group.deleteLater()
             del parent.item_groups[item_name]
             QMessageBox.information(parent, "Erfolg", f"Item '{item_name}' wurde entfernt.")
+
+
+    def upsert_items_to_global_library(self):
+        """
+        Schreibt alle aktuell im Dialog befindlichen Items in die items.json zurück:
+        - aktualisiert bestehende Einträge (per id, Fallback per Name),
+        - ergänzt neue,
+        - übernimmt is_weapon, damage_formula, weapon_category und attributes.
+        Nur, wenn die Checkbox 'save_new_items_globally_checkbox' aktiv ist.
+        """
+        parent = self.parent
+        # Falls Checkbox fehlt oder deaktiviert ist: nichts tun
+        if not getattr(parent, "save_new_items_globally_checkbox", None):
+            return
+        if not parent.save_new_items_globally_checkbox.isChecked():
+            return
+
+        path = "items.json"
+        items_list = []
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    items_list = content.get("items", [])
+            except Exception:
+                items_list = []
+
+        # Indizes für Update
+        by_id = {it.get("id"): it for it in items_list if it.get("id")}
+        by_name = {it.get("name"): it for it in items_list if it.get("name")}
+
+        changed = False
+
+        for item_name, data in parent.item_groups.items():
+            # UI-Felder auslesen, wenn vorhanden
+            cb = data.get("is_weapon_checkbox")
+            dmg_field = data.get("damage_field")
+            cat_combo = data.get("weapon_category_combo")
+
+            is_weapon = bool(cb.isChecked()) if cb is not None else bool(data.get("is_weapon", False))
+            damage_formula = (dmg_field.text().strip() if dmg_field is not None else data.get("damage_formula", "")) if is_weapon else ""
+            weapon_category = (cat_combo.currentText() if cat_combo is not None else data.get("weapon_category")) if is_weapon else None
+
+            record = {
+                "id": data.get("id") or str(uuid.uuid4()),
+                "name": item_name,
+                "description": "",
+                "attributes": data.get("attributes", {}),
+                "linked_conditions": data.get("linked_conditions", []),
+                "is_weapon": is_weapon,
+                "damage_formula": damage_formula,
+                "weapon_category": weapon_category,
+            }
+
+            target = None
+            if record["id"] in by_id:
+                target = by_id[record["id"]]
+            elif item_name in by_name:
+                target = by_name[item_name]
+
+            if target:
+                target.update(record)
+                changed = True
+            else:
+                items_list.append(record)
+                changed = True
+
+        if changed:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
 
     # -----------------------------------------------------
     # 🧩 Item aus Bibliothek hinzufügen

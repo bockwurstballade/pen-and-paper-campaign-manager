@@ -27,7 +27,6 @@ class CharacterCreationDialog(QDialog):
 
     def __init__(self, parent=None):
         self.loaded_file = None
-        self.loaded_file = None      # Pfad zur Datei auf Platte (wenn geladen/gespeichert)
         self.char_id = None          # UUID des Charakters
 
         super().__init__(parent)
@@ -247,6 +246,76 @@ class CharacterCreationDialog(QDialog):
                 font-weight: bold;
             }
         """)
+
+    def upsert_items_to_global_library(self):
+        """
+        Schreibt alle aktuell im Dialog befindlichen Items in die items.json zurück:
+        - aktualisiert bestehende Einträge (per id, Fallback per Name),
+        - ergänzt neue,
+        - übernimmt is_weapon, damage_formula, weapon_category und attributes.
+        Nur, wenn die Checkbox 'save_new_items_globally_checkbox' aktiv ist.
+        """
+        parent = self.parent
+        # Falls Checkbox fehlt oder deaktiviert ist: nichts tun
+        if not getattr(parent, "save_new_items_globally_checkbox", None):
+            return
+        if not parent.save_new_items_globally_checkbox.isChecked():
+            return
+
+        path = "items.json"
+        items_list = []
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    items_list = content.get("items", [])
+            except Exception:
+                items_list = []
+
+        # Indizes für Update
+        by_id = {it.get("id"): it for it in items_list if it.get("id")}
+        by_name = {it.get("name"): it for it in items_list if it.get("name")}
+
+        changed = False
+
+        for item_name, data in parent.item_groups.items():
+            # UI-Felder auslesen, wenn vorhanden
+            cb = data.get("is_weapon_checkbox")
+            dmg_field = data.get("damage_field")
+            cat_combo = data.get("weapon_category_combo")
+
+            is_weapon = bool(cb.isChecked()) if cb is not None else bool(data.get("is_weapon", False))
+            damage_formula = (dmg_field.text().strip() if dmg_field is not None else data.get("damage_formula", "")) if is_weapon else ""
+            weapon_category = (cat_combo.currentText() if cat_combo is not None else data.get("weapon_category")) if is_weapon else None
+
+            record = {
+                "id": data.get("id") or str(uuid.uuid4()),
+                "name": item_name,
+                "description": "",
+                "attributes": data.get("attributes", {}),
+                "linked_conditions": data.get("linked_conditions", []),
+                "is_weapon": is_weapon,
+                "damage_formula": damage_formula,
+                "weapon_category": weapon_category,
+            }
+
+            target = None
+            if record["id"] in by_id:
+                target = by_id[record["id"]]
+            elif item_name in by_name:
+                target = by_name[item_name]
+
+            if target:
+                target.update(record)
+                changed = True
+            else:
+                items_list.append(record)
+                changed = True
+
+        if changed:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
+
 
     def attach_item_conditions(self, item_name, condition_ids):
         """
@@ -731,7 +800,11 @@ class CharacterCreationDialog(QDialog):
 
             # Das merken wir uns für zukünftige Saves in dieser Session
             self.loaded_file = target_path
+        if hasattr(self, "items_handler"):
+            self.items_handler.upsert_items_to_global_library()
 
+        with open(target_path, "w", encoding="utf-8") as f:
+            json.dump(character, f, indent=4, ensure_ascii=False)
         # JSON schreiben
         with open(target_path, "w", encoding="utf-8") as f:
             json.dump(character, f, indent=4, ensure_ascii=False)
@@ -842,12 +915,17 @@ class CharacterCreationDialog(QDialog):
             damage_formula = item_info.get("damage_formula", "")
             weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
             weapon_checkbox.setChecked(is_weapon)
+
             damage_input = QLineEdit()
             weapon_category_label = QLabel("Waffenkategorie:")
             weapon_category_combo = QComboBox()
-            weapon_category_combo.addItems(self.skills_handler.dialog.items_handler.WEAPON_CATEGORIES
-                                        if hasattr(self, "items_handler")
-                                        else ["Nahkampfwaffe", "Schusswaffe", "Explosivwaffe", "Natural", "Magie", "Sonstiges"])
+            weapon_category_combo.addItems(
+                self.items_handler.WEAPON_CATEGORIES
+                if hasattr(self, "items_handler")
+                else ["Nahkampfwaffe", "Schusswaffe", "Explosivwaffe", "Natural", "Magie", "Sonstiges"]
+            )
+            self.items_layout.insertWidget(self.items_layout.count() - 2, item_group)
+
             weapon_category_combo.setCurrentText(item_info.get("weapon_category", "Sonstiges"))
 
             weapon_category_label.setVisible(is_weapon)
@@ -860,18 +938,23 @@ class CharacterCreationDialog(QDialog):
             weapon_cat_row = QHBoxLayout()
             weapon_cat_row.addWidget(weapon_category_label)
             weapon_cat_row.addWidget(weapon_category_combo)
+            item_layout.addWidget(weapon_checkbox)
+            item_layout.addLayout(damage_row)
             item_layout.addLayout(weapon_cat_row)
             # Schadensformel nur anzeigen, wenn Checkbox aktiv ist
             damage_input.setVisible(is_weapon)
 
-            def on_weapon_toggle(state, dmg_input=damage_input):
-                dmg_input.setVisible(state == Qt.CheckState.Checked.value)
+            def on_weapon_toggle(state, dmg_input=damage_input, cat_label=weapon_category_label, cat_combo=weapon_category_combo):
+                is_checked = state == Qt.CheckState.Checked.value
+                dmg_input.setVisible(is_checked)
+                cat_label.setVisible(is_checked)
+                cat_combo.setVisible(is_checked)
+
+            # Sichtbarkeit der Waffenfelder nach dem Setzen aktualisieren
+            on_weapon_toggle(Qt.CheckState.Checked.value if is_weapon else Qt.CheckState.Unchecked.value)
 
             weapon_checkbox.stateChanged.connect(on_weapon_toggle)
 
-            # 🧩 hier einfügen:
-            item_layout.addWidget(weapon_checkbox)
-            item_layout.addLayout(damage_row)
 
             add_attr_button = QPushButton("+ Neue Eigenschaft")
             add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
