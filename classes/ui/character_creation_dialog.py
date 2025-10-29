@@ -845,6 +845,28 @@ class CharacterCreationDialog(QDialog):
             damage_input = QLineEdit()
             damage_input.setPlaceholderText("z. B. 2W10+5")
             damage_input.setText(damage_formula)
+            # damage_row = QHBoxLayout()
+            # damage_row.addWidget(QLabel("Schadensformel:"))
+            # damage_row.addWidget(damage_input)
+
+            # # Schadensformel nur anzeigen, wenn Checkbox aktiv ist
+            # damage_input.setVisible(is_weapon)
+
+            # def on_weapon_toggle(state, dmg_input=damage_input):
+            #     dmg_input.setVisible(state == Qt.CheckState.Checked.value)
+
+            # weapon_checkbox.stateChanged.connect(on_weapon_toggle)
+
+            # add_attr_button = QPushButton("+ Neue Eigenschaft")
+            # add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
+
+            # remove_button = QPushButton("- Item entfernen")
+            # remove_button.clicked.connect(lambda _, item=item_name: self.remove_item_and_detach_conditions(item))
+
+            # item_layout.addLayout(attr_layout)
+            # item_layout.addWidget(add_attr_button)
+            # item_layout.addWidget(remove_button)
+            #             item_group.setLayout(item_layout)
             damage_row = QHBoxLayout()
             damage_row.addWidget(QLabel("Schadensformel:"))
             damage_row.addWidget(damage_input)
@@ -857,6 +879,10 @@ class CharacterCreationDialog(QDialog):
 
             weapon_checkbox.stateChanged.connect(on_weapon_toggle)
 
+            # 🧩 hier einfügen:
+            item_layout.addWidget(weapon_checkbox)
+            item_layout.addLayout(damage_row)
+
             add_attr_button = QPushButton("+ Neue Eigenschaft")
             add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
 
@@ -867,6 +893,8 @@ class CharacterCreationDialog(QDialog):
             item_layout.addWidget(add_attr_button)
             item_layout.addWidget(remove_button)
             item_group.setLayout(item_layout)
+
+
 
             # Vor die beiden Buttons ("+ Neues Item", "+ Item aus Sammlung") einfügen:
             self.items_layout.insertWidget(self.items_layout.count() - 2, item_group)
