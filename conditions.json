@@ -1,0 +1,12 @@
+{
+    "conditions": [
+        {
+            "id": "24114d19-460d-4cae-9465-35e423615453",
+            "name": "test",
+            "description": "",
+            "effect_type": "keine Auswirkung",
+            "effect_target": "",
+            "effect_value": 0
+        }
+    ]
+}

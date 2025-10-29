@@ -16,6 +16,8 @@ from utils.functions.math import kaufmaennisch_runden
 
 from classes.ui.attribute_dialog import AttributeDialog
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
+from classes.ui.character_creation.armor import CharacterCreationDialogArmor
+from classes.ui.character_creation.skills import CharacterCreationDialogSkills
 
 
 class CharacterCreationDialog(QDialog):
@@ -55,8 +57,7 @@ class CharacterCreationDialog(QDialog):
         # Basisdaten-Formular
         self.base_form = QFormLayout()
         self.name_input = QLineEdit()
-        self.class_input = QComboBox()
-        self.class_input.addItems(["Krieger", "Magier", "Dieb"])
+        self.class_input = QLineEdit()
         self.gender_input = QComboBox()
         self.gender_input.addItems(["Männlich", "Weiblich", "Divers"])
         self.age_input = QLineEdit()
@@ -64,8 +65,7 @@ class CharacterCreationDialog(QDialog):
         self.hitpoints_input = QLineEdit()
         self.hitpoints_input.setPlaceholderText("Zahl eingeben")
         self.hitpoints_input.textChanged.connect(self.update_base_hitpoints)
-        self.build_input = QComboBox()
-        self.build_input.addItems(["Schlank", "Durchschnittlich", "Kräftig"])
+        self.build_input = QLineEdit()
         self.religion_input = QLineEdit()
         self.occupation_input = QLineEdit()
         self.marital_status_input = QComboBox()
@@ -83,11 +83,44 @@ class CharacterCreationDialog(QDialog):
         self.role_input = QComboBox()
         self.role_input.addItems(["Spielercharakter", "NSC / Gegner"])
         self.base_form.insertRow(0, "Typ:", self.role_input)
-
+        # Beschreibung (mehrzeilig)
+        self.description_input = QTextEdit()
+        self.description_input.setPlaceholderText("Hier kannst du eine Hintergrundgeschichte oder Notizen eintragen...")
+        self.description_input.setFixedHeight(120)  # optional: begrenzt sichtbare Höhe
+        self.base_form.addRow("Beschreibung:", self.description_input)
 
         main_layout.addLayout(self.base_form)
 
+        # ---------- Rüstungsmodul ----------
+        self.armor_group = QGroupBox("Rüstung")
+        self.style_groupbox(self.armor_group)
+        armor_layout = QFormLayout()
+
+        # Checkbox zum Aktivieren
+        self.armor_enabled_checkbox = QCheckBox("Rüstungsmodul aktivieren")
+        self.armor_handler = CharacterCreationDialogArmor(self)
+        self.armor_enabled_checkbox.stateChanged.connect(self.armor_handler.toggle_armor_fields)
+        armor_layout.addRow(self.armor_enabled_checkbox)
+
+        # Eingabefelder für Rüstungswert & Zustand
+        self.armor_value_input = QLineEdit()
+        self.armor_value_input.setPlaceholderText("0–9")
+        self.armor_condition_input = QLineEdit()
+        self.armor_condition_input.setPlaceholderText("0–9")
+
+        # Beide Felder erst einmal ausblenden
+        self.armor_value_input.setVisible(False)
+        self.armor_condition_input.setVisible(False)
+
+        armor_layout.addRow("Rüstungswert:", self.armor_value_input)
+        armor_layout.addRow("Rüstungszustand:", self.armor_condition_input)
+
+        self.armor_group.setLayout(armor_layout)
+        main_layout.addWidget(self.armor_group)
+        # ---------- /Rüstungsmodul ----------
+
         # Fähigkeiten
+        self.skills_handler = CharacterCreationDialogSkills(self)
         self.skills = {"Handeln": [], "Wissen": [], "Soziales": []}
         self.skill_inputs = {}
         self.skill_end_labels = {}
@@ -110,7 +143,7 @@ class CharacterCreationDialog(QDialog):
             vbox.addLayout(self.form_layouts[category])
 
             self.add_buttons[category] = QPushButton("+ Neue Fähigkeit")
-            self.add_buttons[category].clicked.connect(lambda _, cat=category: self.add_skill(cat))
+            self.add_buttons[category].clicked.connect(lambda _, cat=category: self.skills_handler.add_skill(cat))
             vbox.addWidget(self.add_buttons[category])
 
             self.group_boxes[category].setLayout(vbox)
@@ -138,6 +171,10 @@ class CharacterCreationDialog(QDialog):
         self.items_layout.addWidget(self.item_add_from_lib_button)
         self.items_group.setLayout(self.items_layout)
         main_layout.addWidget(self.items_group)
+        # Checkbox: globales Speichern aktivieren
+        self.save_new_items_globally_checkbox = QCheckBox("Neue Items auch in der globalen Sammlung (items.json) speichern")
+        self.save_new_items_globally_checkbox.setChecked(True)
+        self.items_layout.addWidget(self.save_new_items_globally_checkbox)
 
         # Zustände
         self.conditions_group = QGroupBox("Zustände")
@@ -249,74 +286,6 @@ class CharacterCreationDialog(QDialog):
             }
         """)
 
-    def add_skill(self, category):
-        skill_name, ok = QInputDialog.getText(self, f"Neue Fähigkeit für {category}", "Fähigkeitsname:")
-        if not ok or not skill_name.strip():
-            QMessageBox.warning(self, "Fehler", "Fähigkeitsname darf nicht leer sein.")
-            return
-        skill_name = skill_name.strip()
-        if skill_name in self.skills[category]:
-            QMessageBox.warning(self, "Fehler", f"Fähigkeit '{skill_name}' existiert bereits in {category}.")
-            return
-
-        # Fähigkeit hinzufügen
-        self.skills[category].append(skill_name)
-        self.skill_end_labels.setdefault(category, {})
-
-        # Eingabefeld + Entfernen-Button + Endwert-Label
-        input_field = QLineEdit()
-        input_field.setPlaceholderText("0–100")
-        input_field.textChanged.connect(self.update_points)
-
-        end_label = QLabel("Endwert: 0")
-        self.skill_end_labels[category][skill_name] = end_label
-
-        remove_button = QPushButton("– Entfernen")
-        remove_button.clicked.connect(lambda _, cat=category, skill=skill_name: self.remove_skill(cat, skill))
-
-        # Layout der Zeile
-        h_layout = QHBoxLayout()
-        h_layout.addWidget(input_field)
-        h_layout.addWidget(end_label)
-        h_layout.addWidget(remove_button)
-
-        self.skill_inputs[category][skill_name] = input_field
-        self.form_layouts[category].addRow(f"{skill_name}:", h_layout)
-        self.update_points()
-
-
-    def remove_skill(self, category, skill_name):
-        """Entfernt eine Fähigkeit aus dem Layout und den Datenstrukturen."""
-        if skill_name not in self.skills[category]:
-            return
-
-        self.skills[category].remove(skill_name)
-        input_field = self.skill_inputs[category].pop(skill_name)
-        if skill_name in self.skill_end_labels.get(category, {}):
-            del self.skill_end_labels[category][skill_name]
-
-        # Layoutzeile im FormLayout finden und entfernen
-        form_layout = self.form_layouts[category]
-        for i in range(form_layout.rowCount()):
-            label_item = form_layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
-            field_item = form_layout.itemAt(i, QFormLayout.ItemRole.FieldRole)
-            if label_item and label_item.widget() and label_item.widget().text().startswith(skill_name):
-                # Widgets explizit löschen
-                label_item.widget().deleteLater()
-                if field_item:
-                    field_widget = field_item.layout() or field_item.widget()
-                    if field_widget:
-                        while isinstance(field_widget, QHBoxLayout) and field_widget.count():
-                            item = field_widget.takeAt(0)
-                            if item.widget():
-                                item.widget().deleteLater()
-                        field_widget.deleteLater()
-                form_layout.removeRow(i)
-                break
-
-        self.update_points()
-        QMessageBox.information(self, "Erfolg", f"Fertigkeit '{skill_name}' wurde entfernt.")
-
 
     def add_item(self):
         # 1. Namen abfragen wie bisher
@@ -402,6 +371,48 @@ class CharacterCreationDialog(QDialog):
         # Wir wollen das neue Item VOR diesen Buttons einfügen.
         insert_pos = max(0, self.items_layout.count() - 2)
         self.items_layout.insertWidget(insert_pos, item_group)
+
+        # Falls globales Speichern aktiviert ist, Item auch in items.json ablegen
+        if self.save_new_items_globally_checkbox.isChecked():
+            self._save_item_to_global_library(item_name)
+
+    def _save_item_to_global_library(self, item_name):
+        """Speichert ein neu erstelltes Item zusätzlich in items.json."""
+        data = self.item_groups[item_name]
+
+        # Itemdaten aus der Charakterstruktur entnehmen
+        item_obj = {
+            "id": str(uuid.uuid4()),
+            "name": item_name,
+            "description": "",
+            "attributes": data.get("attributes", {}),
+            "linked_conditions": [],
+            "is_weapon": data["is_weapon_checkbox"].isChecked() if data["is_weapon_checkbox"] else False,
+            "damage_formula": data["damage_field"].text().strip() if data["damage_field"] else ""
+        }
+
+        # items.json laden oder neu anlegen
+        items_list = []
+        if os.path.exists("items.json"):
+            try:
+                with open("items.json", "r", encoding="utf-8") as f:
+                    content = json.load(f)
+                    items_list = content.get("items", [])
+            except Exception:
+                pass
+
+        # Prüfen, ob ein Item mit gleichem Namen existiert (optional)
+        for existing in items_list:
+            if existing.get("name") == item_name:
+                QMessageBox.information(self, "Hinweis", f"Item '{item_name}' existiert bereits in items.json.")
+                return
+
+        items_list.append(item_obj)
+
+        with open("items.json", "w", encoding="utf-8") as f:
+            json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
+
+        QMessageBox.information(self, "Gespeichert", f"Item '{item_name}' wurde auch in items.json gespeichert.")
 
 
     def add_attribute(self, item_name):
@@ -926,68 +937,6 @@ class CharacterCreationDialog(QDialog):
         self.apply_mission_effects()
         self.apply_all_mission_effects()
 
-
-
-    def update_points(self):
-        try:
-            total_used = 0
-            for category in self.skills:
-                category_sum = 0
-                for skill, input_field in self.skill_inputs[category].items():
-                    value = input_field.text()
-                    if value:
-                        val = int(value)
-                        if 0 <= val <= 100:
-                            category_sum += val
-                        else:
-                            input_field.setText("")
-                            raise ValueError(f"{skill}: Wert muss zwischen 0 und 100 liegen.")
-                # Kategorie-Wert berechnen
-                category_score = kaufmaennisch_runden(category_sum / 10)
-                self.category_labels[category].setText(f"{category}-Wert: {category_score}")
-
-                # Geistesblitzpunkte berechnen
-                inspiration_points = kaufmaennisch_runden(category_sum / (10 * 10))
-                self.inspiration_labels[category].setText(f"Geistesblitzpunkte ({category}): {inspiration_points}")
-
-                # Endwerte für Fähigkeiten aktualisieren
-                for skill, input_field in self.skill_inputs[category].items():
-                    try:
-                        val = int(input_field.text()) if input_field.text() else 0
-                    except ValueError:
-                        val = 0
-                    end_value = val + category_score
-                    if category in self.skill_end_labels and skill in self.skill_end_labels[category]:
-                        self.skill_end_labels[category][skill].setText(f"Endwert: {end_value}")
-
-                total_used += category_sum
-
-            remaining = 400 - total_used
-            # Basiswerte für spätere Zustandsanwendung speichern
-            for category in self.skills:
-                category_label_text = self.category_labels[category].text()
-                cat_value = int(category_label_text.split(":")[-1].strip())
-                self.base_values["Kategorien"][category] = cat_value
-
-                insp_label_text = self.inspiration_labels[category].text()
-                insp_value = int(insp_label_text.split(":")[-1].strip().replace("Geistesblitzpunkte", "").strip())
-                self.base_values["Geistesblitzpunkte"][category] = insp_value
-
-                for skill, input_field in self.skill_inputs[category].items():
-                    try:
-                        val = int(input_field.text()) if input_field.text() else 0
-                    except ValueError:
-                        val = 0
-                    self.base_values["Fertigkeiten"][skill] = val
-
-            self.total_points_label.setText(f"Verbleibende Punkte: {remaining}")
-            if remaining < 0:
-                raise ValueError("Gesamtpunkte überschreiten 400!")
-            self.update_endwert_labels()
-
-        except ValueError as e:
-            QMessageBox.warning(self, "Fehler", str(e))
-
     def apply_mission_effects(self):
         """Aktualisiert alle missionsweiten Effekte auf den Charakterwerten."""
         base_hp = self.base_hitpoints
@@ -1081,45 +1030,8 @@ class CharacterCreationDialog(QDialog):
                         field.setToolTip("")
                     break
 
-        # ✨ NEU: nach allen Modifikationen Endwert-Labels updaten
-        self.update_endwert_labels()
-
-    def update_endwert_labels(self):
-        """
-        Aktualisiert alle Endwert-Labels für alle Fertigkeiten basierend auf:
-        - aktuellem (ggf. modifiziertem) Skill-Wert im Eingabefeld
-        - aktuellem (ggf. modifiziertem) Kategoriewert-Label
-        """
-        for category in self.skills:
-            # aktuellen (ggf. modifizierten) Kategoriewert aus dem Label parsen
-            # Label sieht jetzt z.B. so aus:
-            #   "Handeln-Wert: 5"
-            # oder nach Mod: 
-            #   "Handeln-Wert: 3 (Mod: Fieber (-2))"
-            cat_label_text = self.category_labels[category].text()
-            # wir holen die erste Zahl nach dem Doppelpunkt
-            try:
-                cat_current_value_str = cat_label_text.split(":")[1].strip().split(" ")[0]
-                cat_current_value = int(cat_current_value_str)
-            except Exception:
-                cat_current_value = 0
-
-            # jetzt alle Skills dieser Kategorie anfassen
-            for skill, input_field in self.skill_inputs[category].items():
-                # aktueller (ggf. modifizierter) Skillwert aus dem Feld
-                try:
-                    skill_val = int(input_field.text()) if input_field.text() else 0
-                except ValueError:
-                    skill_val = 0
-
-                # Endwert = Skillwert + Kategoriewert
-                final_val = skill_val + cat_current_value
-
-                # zum passenden Endwert-Label schreiben
-                if category in self.skill_end_labels and skill in self.skill_end_labels[category]:
-                    self.skill_end_labels[category][skill].setText(f"Endwert: {final_val}")
-
-
+        # nach allen Modifikationen Endwert-Labels updaten
+        self.skills_handler.update_endwert_labels()
 
     def update_base_hitpoints(self):
         """Aktualisiert den gespeicherten Basiswert, wenn der Nutzer Lebenspunkte manuell ändert."""
@@ -1146,8 +1058,25 @@ class CharacterCreationDialog(QDialog):
                 raise ValueError("Lebenspunkte müssen zwischen 1 und 100 liegen.")
 
             religion = self.religion_input.text().strip()
+            description = self.description_input.toPlainText().strip()
             occupation = self.occupation_input.text().strip()
             base_damage = self.base_damage_input.text().strip()
+
+            # Rüstungsdaten
+            armor_enabled = self.armor_enabled_checkbox.isChecked()
+            armor_value = None
+            armor_condition = None
+
+            if armor_enabled:
+                try:
+                    armor_value = int(self.armor_value_input.text())
+                    armor_condition = int(self.armor_condition_input.text())
+                    if not (0 <= armor_value <= 9) or not (0 <= armor_condition <= 9):
+                        raise ValueError("Rüstungswert und Rüstungszustand müssen zwischen 0 und 9 liegen.")
+                except ValueError:
+                    QMessageBox.warning(self, "Fehler", "Bitte gültige Rüstungswerte (0–9) eingeben.")
+                    return
+
 
             total_used = 0
             skills_data = {}
@@ -1242,12 +1171,12 @@ class CharacterCreationDialog(QDialog):
         character = {
             "id": self.char_id,
             "name": name,
-            "class": self.class_input.currentText(),
+            "class": self.class_input.text(),
             "gender": self.gender_input.currentText(),
             "age": age,
             "hitpoints": hitpoints,
             "base_damage": base_damage,
-            "build": self.build_input.currentText(),
+            "build": self.build_input.text(),
             "religion": religion,
             "occupation": occupation,
             "marital_status": self.marital_status_input.currentText(),
@@ -1256,7 +1185,11 @@ class CharacterCreationDialog(QDialog):
             "inspiration_points": inspiration_points,
             "items": items_data,
             "conditions": conditions_data,
-            "role": "pc" if self.role_input.currentText().startswith("Spieler") else "npc"
+            "description": description,
+            "role": "pc" if self.role_input.currentText().startswith("Spieler") else "npc",
+            "armor_enabled": armor_enabled,
+            "armor_value": armor_value,
+            "armor_condition": armor_condition
         }
 
         # Speicherort bestimmen
@@ -1294,16 +1227,38 @@ class CharacterCreationDialog(QDialog):
         self.char_id = character.get("id", str(uuid.uuid4()))
         # Basisfelder
         self.name_input.setText(character.get("name", ""))
-        self.class_input.setCurrentText(character.get("class", "Krieger"))
+        self.class_input.setText(character.get("class", ""))
         self.gender_input.setCurrentText(character.get("gender", "Männlich"))
         self.age_input.setText(str(character.get("age", "")))
         self.base_hitpoints = int(character.get("hitpoints", 0))
         self.hitpoints_input.setText(str(self.base_hitpoints))
-        self.build_input.setCurrentText(character.get("build", "Durchschnittlich"))
+        self.build_input.setText(character.get("build", ""))
         self.religion_input.setText(character.get("religion", ""))
         self.occupation_input.setText(character.get("occupation", ""))
         self.marital_status_input.setCurrentText(character.get("marital_status", "Ledig"))
         self.base_damage_input.setText(character.get("base_damage", ""))
+        self.description_input.setPlainText(character.get("description", ""))
+
+        # Rüstungsmodul wiederherstellen
+        armor_enabled = character.get("armor_enabled", False)
+        armor_value = character.get("armor_value")
+        armor_condition = character.get("armor_condition")
+
+        # Blockiere Signale, um kein ungewolltes Toggle auszulösen
+        self.armor_enabled_checkbox.blockSignals(True)
+        self.armor_enabled_checkbox.setChecked(armor_enabled)
+        self.armor_enabled_checkbox.blockSignals(False)
+
+        # Eingabefelder wiederherstellen
+        if armor_value is not None:
+            self.armor_value_input.setText(str(armor_value))
+        if armor_condition is not None:
+            self.armor_condition_input.setText(str(armor_condition))
+
+        # Jetzt manuell Sichtbarkeit / Aktivierung aktualisieren
+        self.armor_handler.toggle_armor_fields(
+            Qt.CheckState.Checked.value if armor_enabled else Qt.CheckState.Unchecked.value
+        )
 
 
         # Reset Strukturen für Fähigkeiten
@@ -1327,13 +1282,13 @@ class CharacterCreationDialog(QDialog):
                 self.skills[category].append(skill)
 
                 input_field = QLineEdit(str(value))
-                input_field.textChanged.connect(self.update_points)
+                input_field.textChanged.connect(self.skills_handler.update_points)
 
                 end_label = QLabel("Endwert: 0")
                 self.skill_end_labels[category][skill] = end_label
 
                 remove_button = QPushButton("– Entfernen")
-                remove_button.clicked.connect(lambda _, cat=category, skill=skill: self.remove_skill(cat, skill))
+                remove_button.clicked.connect(lambda _, cat=category, skill=skill: self.skills_handler.remove_skill(cat, skill))
 
                 h_layout = QHBoxLayout()
                 h_layout.addWidget(input_field)
@@ -1442,7 +1397,7 @@ class CharacterCreationDialog(QDialog):
         self.recalculate_conditions_effects()
 
         # Skills / Endwerte aktualisieren
-        self.update_points()
+        self.skills_handler.update_points()
         # Charakter Rolle
         role = character.get("role", "pc")
         if role == "npc":

@@ -1,0 +1,53 @@
+{
+    "items": [
+        {
+            "id": "51055b15-d65d-4f48-b084-d9d2963e8f6d",
+            "name": "test",
+            "description": "test",
+            "attributes": {
+                "farbe": "braun"
+            },
+            "is_weapon": false,
+            "damage_formula": "",
+            "linked_conditions": [
+                "24114d19-460d-4cae-9465-35e423615453"
+            ]
+        },
+        {
+            "id": "631e7304-81f9-4091-9630-10bb01986d5d",
+            "name": "G36",
+            "description": "",
+            "attributes": {},
+            "is_weapon": true,
+            "damage_formula": "7W10",
+            "linked_conditions": []
+        },
+        {
+            "id": "70048849-38d5-4da8-9520-b0bb4492f6dc",
+            "name": "Katana",
+            "description": "",
+            "attributes": {},
+            "is_weapon": true,
+            "damage_formula": "5W10",
+            "linked_conditions": []
+        },
+        {
+            "id": "6a7e3c87-6d33-4e19-bf19-765a97d341dc",
+            "name": "Feilschen",
+            "description": "",
+            "attributes": {},
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": ""
+        },
+        {
+            "id": "f5fa85db-cc51-4b8a-886c-6d27d05cbcc1",
+            "name": "Funkgerät - Neuanfang - Sicherheitsstufe 2",
+            "description": "",
+            "attributes": {},
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": ""
+        }
+    ]
+}

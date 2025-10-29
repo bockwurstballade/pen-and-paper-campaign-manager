@@ -1,0 +1,56 @@
+{
+    "id": "c4338c99-9542-4a96-a373-42719964285e",
+    "name": "Maya Shadow Vasquez",
+    "class": "Kämpfering",
+    "gender": "Männlich",
+    "age": 42,
+    "hitpoints": 100,
+    "base_damage": "",
+    "build": "athletisch",
+    "religion": "agnostisch",
+    "occupation": "Ex-Soldatin, Mutter",
+    "marital_status": "Verwitwet",
+    "skills": {
+        "Handeln": {
+            "Schießen": 70,
+            "Akrobatik": 60,
+            "Überleben": 60
+        },
+        "Wissen": {
+            "Programmieren": 60,
+            "Politik": 60
+        },
+        "Soziales": {
+            "Feilschen": 50,
+            "Überreden": 40
+        }
+    },
+    "category_scores": {
+        "Handeln": 19,
+        "Wissen": 12,
+        "Soziales": 9
+    },
+    "inspiration_points": {
+        "Handeln": 2,
+        "Wissen": 1,
+        "Soziales": 1
+    },
+    "items": {
+        "Funkgerät - Neuanfang - Sicherheitsstufe 2": {
+            "attributes": {
+                "Farbe": "olivgrün",
+                "Sicherheitsstufe": "2"
+            },
+            "id": null,
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": ""
+        }
+    },
+    "conditions": {},
+    "description": "Maya war zum Zeitpunkt des Ausbruchs Kommandosoldatin beim Militär und hat daher gesondertes Wissen über die Hintergründe. Sie hasst spitze Gegenstände.",
+    "role": "pc",
+    "armor_enabled": true,
+    "armor_value": 5,
+    "armor_condition": 9
+}
