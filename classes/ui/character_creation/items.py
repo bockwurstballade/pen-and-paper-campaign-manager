@@ -4,7 +4,7 @@ Everything realted to creating items inside the Character Creation Dialog
 """
 from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox, QGroupBox, QVBoxLayout, QFormLayout,
-    QLabel, QPushButton, QCheckBox, QLineEdit, QHBoxLayout
+    QLabel, QPushButton, QCheckBox, QLineEdit, QHBoxLayout, QComboBox
 )
 from PyQt6.QtCore import Qt
 import os
@@ -14,6 +14,16 @@ from classes.ui.attribute_dialog import AttributeDialog
 
 
 class CharacterCreationDialogItems:
+
+    WEAPON_CATEGORIES = [
+        "Nahkampfwaffe",
+        "Schusswaffe",
+        "Explosivwaffe",
+        "Natural",
+        "Magie",
+        "Sonstiges"
+    ]
+
     def __init__(self, parent):
         self.parent = parent  # Referenz auf CharacterCreationDialog
 
@@ -60,16 +70,43 @@ class CharacterCreationDialogItems:
         damage_row.addWidget(QLabel("Schadensformel:"))
         damage_row.addWidget(damage_input)
         damage_input.setVisible(False)
+        # ⚙️ NEU: Waffenkategorie-Auswahl
+        weapon_category_label = QLabel("Waffenkategorie:")
+        weapon_category_combo = QComboBox()
+        weapon_category_combo.addItems(self.WEAPON_CATEGORIES)
 
+        # --- Sichtbarkeit beim Start ---
+        damage_input.setVisible(False)
+        weapon_category_label.setVisible(False)
+        weapon_category_combo.setVisible(False)
+        # --- Layouts vorbereiten ---
+        damage_row = QHBoxLayout()
+        damage_row.addWidget(QLabel("Schadensformel:"))
+        damage_row.addWidget(damage_input)
+
+        weapon_cat_row = QHBoxLayout()
+        weapon_cat_row.addWidget(weapon_category_label)
+        weapon_cat_row.addWidget(weapon_category_combo)
+
+        # 🧠 ERWEITERTE Toggle-Funktion
         def on_weapon_toggle(state):
-            damage_input.setVisible(state == Qt.CheckState.Checked.value)
+            is_checked = state == Qt.CheckState.Checked.value
+            damage_input.setVisible(is_checked)
+            weapon_category_label.setVisible(is_checked)
+            weapon_category_combo.setVisible(is_checked)
 
+        # Signal verbinden
         weapon_checkbox.stateChanged.connect(on_weapon_toggle)
+
+        # Alles ins Layout einfügen
         item_layout.addWidget(weapon_checkbox)
         item_layout.addLayout(damage_row)
+        item_layout.addLayout(weapon_cat_row)
 
+        # Referenzen speichern
         parent.item_groups[item_name]["is_weapon_checkbox"] = weapon_checkbox
         parent.item_groups[item_name]["damage_field"] = damage_input
+        parent.item_groups[item_name]["weapon_category_combo"] = weapon_category_combo
 
         # Buttons
         add_attr_button = QPushButton("+ Neue Eigenschaft")

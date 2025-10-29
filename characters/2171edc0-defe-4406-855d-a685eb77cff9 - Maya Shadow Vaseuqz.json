@@ -33,10 +33,25 @@
             "attributes": {},
             "id": "631e7304-81f9-4091-9630-10bb01986d5d",
             "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": "",
+            "weapon_category": null
+        },
+        "G36 Gewehr": {
+            "attributes": {
+                "Farbe": "schwarz"
+            },
+            "id": null,
+            "linked_conditions": [],
             "is_weapon": true,
-            "damage_formula": "7W10"
+            "damage_formula": "7W10",
+            "weapon_category": "Sonstiges"
         }
     },
     "conditions": {},
-    "role": "pc"
+    "description": "",
+    "role": "pc",
+    "armor_enabled": false,
+    "armor_value": null,
+    "armor_condition": null
 }

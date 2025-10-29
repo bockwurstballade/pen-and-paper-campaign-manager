@@ -391,7 +391,7 @@ class CharacterCreationDialog(QDialog):
         if widget:
             self.conditions_layout.removeWidget(widget)
             widget.deleteLater()
-
+        condition_name = cond_info["name"]
         # aus Tracking entfernen
         self.active_condition_by_id.pop(cid, None)
         """Entfernt einen Zustand aus der Liste."""
@@ -633,31 +633,31 @@ class CharacterCreationDialog(QDialog):
             for item_name, data in self.item_groups.items():
                 is_weapon = False
                 damage_formula = ""
+                weapon_category = None
 
-                # Falls dieses Item im Dialog direkt erstellt wurde,
-                # gibt es die Felder is_weapon_checkbox / damage_field
                 weapon_cb = data.get("is_weapon_checkbox")
                 dmg_field = data.get("damage_field")
+                weapon_cat_combo = data.get("weapon_category_combo")
 
                 if weapon_cb is not None and dmg_field is not None:
                     is_weapon = weapon_cb.isChecked()
                     damage_formula = dmg_field.text().strip() if is_weapon else ""
+                    weapon_category = (
+                        weapon_cat_combo.currentText() if (is_weapon and weapon_cat_combo is not None) else None
+                    )
                 else:
-                    # Falls das Item aus der Bibliothek kam (add_item_from_library),
-                    # liegen die Infos nicht in Widgets, sondern nur implizit in attributes.
-                    # Beim Laden aus der Bibliothek hatten wir:
-                    #   if chosen_item.get("is_weapon"):
-                    #       ...
-                    # Da haben wir's NICHT explizit gespeichert. Holen wir jetzt nach:
+                    # Bibliotheksitems
                     is_weapon = bool(data.get("is_weapon", False))
                     damage_formula = data.get("damage_formula", "")
+                    weapon_category = data.get("weapon_category", None)
 
                 items_data[item_name] = {
                     "attributes": data.get("attributes", {}),
-                    "id": data.get("id", None),  # kann None sein für neue Items
+                    "id": data.get("id", None),
                     "linked_conditions": data.get("linked_conditions", []),
                     "is_weapon": is_weapon,
                     "damage_formula": damage_formula,
+                    "weapon_category": weapon_category,
                 }
 
 
@@ -843,34 +843,24 @@ class CharacterCreationDialog(QDialog):
             weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
             weapon_checkbox.setChecked(is_weapon)
             damage_input = QLineEdit()
+            weapon_category_label = QLabel("Waffenkategorie:")
+            weapon_category_combo = QComboBox()
+            weapon_category_combo.addItems(self.skills_handler.dialog.items_handler.WEAPON_CATEGORIES
+                                        if hasattr(self, "items_handler")
+                                        else ["Nahkampfwaffe", "Schusswaffe", "Explosivwaffe", "Natural", "Magie", "Sonstiges"])
+            weapon_category_combo.setCurrentText(item_info.get("weapon_category", "Sonstiges"))
+
+            weapon_category_label.setVisible(is_weapon)
+            weapon_category_combo.setVisible(is_weapon)
             damage_input.setPlaceholderText("z. B. 2W10+5")
             damage_input.setText(damage_formula)
-            # damage_row = QHBoxLayout()
-            # damage_row.addWidget(QLabel("Schadensformel:"))
-            # damage_row.addWidget(damage_input)
-
-            # # Schadensformel nur anzeigen, wenn Checkbox aktiv ist
-            # damage_input.setVisible(is_weapon)
-
-            # def on_weapon_toggle(state, dmg_input=damage_input):
-            #     dmg_input.setVisible(state == Qt.CheckState.Checked.value)
-
-            # weapon_checkbox.stateChanged.connect(on_weapon_toggle)
-
-            # add_attr_button = QPushButton("+ Neue Eigenschaft")
-            # add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
-
-            # remove_button = QPushButton("- Item entfernen")
-            # remove_button.clicked.connect(lambda _, item=item_name: self.remove_item_and_detach_conditions(item))
-
-            # item_layout.addLayout(attr_layout)
-            # item_layout.addWidget(add_attr_button)
-            # item_layout.addWidget(remove_button)
-            #             item_group.setLayout(item_layout)
             damage_row = QHBoxLayout()
             damage_row.addWidget(QLabel("Schadensformel:"))
             damage_row.addWidget(damage_input)
-
+            weapon_cat_row = QHBoxLayout()
+            weapon_cat_row.addWidget(weapon_category_label)
+            weapon_cat_row.addWidget(weapon_category_combo)
+            item_layout.addLayout(weapon_cat_row)
             # Schadensformel nur anzeigen, wenn Checkbox aktiv ist
             damage_input.setVisible(is_weapon)
 
@@ -894,16 +884,12 @@ class CharacterCreationDialog(QDialog):
             item_layout.addWidget(remove_button)
             item_group.setLayout(item_layout)
 
-
-
-            # Vor die beiden Buttons ("+ Neues Item", "+ Item aus Sammlung") einfügen:
-            self.items_layout.insertWidget(self.items_layout.count() - 2, item_group)
-
             self.item_groups[item_name] = {
                 "attributes": dict(attrs),
                 "layout": item_layout,
                 "group": item_group,
                 "id": item_uuid,
+                "weapon_category_combo": weapon_category_combo,
                 "linked_conditions": linked_conditions
             }
 

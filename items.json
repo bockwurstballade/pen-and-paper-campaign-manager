@@ -57,6 +57,15 @@
             "linked_conditions": [],
             "is_weapon": false,
             "damage_formula": ""
+        },
+        {
+            "id": "ec5708cc-8d2f-46c5-af48-ce35e67ad74f",
+            "name": "G36 Gewehr",
+            "description": "",
+            "attributes": {},
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": ""
         }
     ]
 }
