@@ -4,7 +4,7 @@ Everything realted to creating items inside the Character Creation Dialog
 """
 from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox, QGroupBox, QVBoxLayout, QFormLayout,
-    QLabel, QPushButton, QCheckBox, QLineEdit, QHBoxLayout, QComboBox
+    QLabel, QPushButton, QCheckBox, QLineEdit, QHBoxLayout, QComboBox, QSpinBox
 )
 from PyQt6.QtCore import Qt
 import os
@@ -36,90 +36,128 @@ class CharacterCreationDialogItems:
         if not ok or not item_name.strip():
             QMessageBox.warning(parent, "Fehler", "Item-Name darf nicht leer sein.")
             return
-
         item_name = item_name.strip()
         if item_name in parent.item_groups:
             QMessageBox.warning(parent, "Fehler", f"Item '{item_name}' existiert bereits.")
             return
 
-        # Neue GroupBox
-        item_group = QGroupBox(item_name)
-        parent.style_groupbox(item_group)
-        item_layout = QVBoxLayout()
+        # --- Grundlayout ---
+        group = QGroupBox(item_name)
+        parent.style_groupbox(group)
+        vbox = QVBoxLayout()
+        attr_layout = QFormLayout()
+        vbox.addLayout(attr_layout)
 
         parent.item_groups[item_name] = {
             "attributes": {},
-            "layout": item_layout,
-            "group": item_group,
-            "id": None,
+            "layout": vbox,
+            "group": group,
             "linked_conditions": [],
-            "is_weapon_checkbox": None,
-            "damage_field": None,
+            "id": None,
         }
 
-        # Attribute-Layout
-        attr_layout = QFormLayout()
-        parent.item_groups[item_name]["attr_layout"] = attr_layout
-        item_layout.addLayout(attr_layout)
+        # --- Waffenoption ---
+        weapon_cb = QCheckBox("Dieses Item ist eine Waffe")
+        dmg_field = QLineEdit()
+        dmg_field.setPlaceholderText("z. B. 1W6 + 2")
+        dmg_row = QHBoxLayout()
+        dmg_row.addWidget(QLabel("Schadensformel:"))
+        dmg_row.addWidget(dmg_field)
+        dmg_field.setVisible(False)
 
-        # Waffenoption
-        weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
-        damage_input = QLineEdit()
-        damage_input.setPlaceholderText("z. B. 1W6+2")
-        damage_row = QHBoxLayout()
-        damage_row.addWidget(QLabel("Schadensformel:"))
-        damage_row.addWidget(damage_input)
-        damage_input.setVisible(False)
-        # ⚙️ NEU: Waffenkategorie-Auswahl
-        weapon_category_label = QLabel("Waffenkategorie:")
-        weapon_category_combo = QComboBox()
-        weapon_category_combo.addItems(self.WEAPON_CATEGORIES)
+        # Kategorie
+        cat_label = QLabel("Waffenkategorie:")
+        cat_combo = QComboBox(); cat_combo.addItems(self.WEAPON_CATEGORIES)
+        cat_label.setVisible(False); cat_combo.setVisible(False)
 
-        # --- Sichtbarkeit beim Start ---
-        damage_input.setVisible(False)
-        weapon_category_label.setVisible(False)
-        weapon_category_combo.setVisible(False)
+        cat_row = QHBoxLayout()
+        cat_row.addWidget(cat_label)
+        cat_row.addWidget(cat_combo)
 
-        weapon_cat_row = QHBoxLayout()
-        weapon_cat_row.addWidget(weapon_category_label)
-        weapon_cat_row.addWidget(weapon_category_combo)
+        # --- Waffen-Status ---
+        state_layout = QFormLayout()
 
-        # 🧠 ERWEITERTE Toggle-Funktion
-        def on_weapon_toggle(state, dmg_input=damage_input, cat_label=weapon_category_label, cat_combo=weapon_category_combo):
-            is_checked = state == Qt.CheckState.Checked.value
-            dmg_input.setVisible(is_checked)
-            cat_label.setVisible(is_checked)
-            cat_combo.setVisible(is_checked)
+        # Schusswaffen
+        chambers_cap = QSpinBox(); chambers_cap.setRange(0, 10)
+        chambers_loaded = QSpinBox(); chambers_loaded.setRange(0, 10)
+        mag_inserted = QCheckBox("Magazin eingelegt")
+        mag_cap = QSpinBox(); mag_cap.setRange(0, 200)
+        mag_count = QSpinBox(); mag_count.setRange(0, 200)
 
+        # Bögen / Schleudern
+        proj_loaded = QSpinBox(); proj_loaded.setRange(0, 5)
+        proj_type = QLineEdit(); proj_type.setPlaceholderText("z. B. Pfeil, Kugel …")
 
-        # Signal verbinden
-        weapon_checkbox.stateChanged.connect(on_weapon_toggle)
+        for w in (chambers_cap, chambers_loaded, mag_inserted,
+                  mag_cap, mag_count, proj_loaded, proj_type):
+            w.setVisible(False)
 
-        # Alles ins Layout einfügen
-        item_layout.addWidget(weapon_checkbox)
-        item_layout.addLayout(damage_row)
-        item_layout.addLayout(weapon_cat_row)
+        state_layout.addRow("Kammern (max):", chambers_cap)
+        state_layout.addRow("Kammern geladen:", chambers_loaded)
+        state_layout.addRow(mag_inserted)
+        state_layout.addRow("Magazin Kapazität:", mag_cap)
+        state_layout.addRow("Magazin aktuell:", mag_count)
+        state_layout.addRow("Proj. geladen:", proj_loaded)
+        state_layout.addRow("Proj. Typ:", proj_type)
 
-        # Referenzen speichern
-        parent.item_groups[item_name]["is_weapon_checkbox"] = weapon_checkbox
-        parent.item_groups[item_name]["damage_field"] = damage_input
-        parent.item_groups[item_name]["weapon_category_combo"] = weapon_category_combo
+        # --- Sichtbarkeits-Logik ---
+        def on_weapon_toggle(state):
+            checked = state == Qt.CheckState.Checked.value
+            dmg_field.setVisible(checked)
+            cat_label.setVisible(checked)
+            cat_combo.setVisible(checked)
+            for w in (chambers_cap, chambers_loaded, mag_inserted,
+                      mag_cap, mag_count, proj_loaded, proj_type):
+                w.setVisible(False)
 
-        # Buttons
-        add_attr_button = QPushButton("+ Neue Eigenschaft")
-        add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
-        item_layout.addWidget(add_attr_button)
+        def on_category_changed(cat):
+            # alles ausblenden, dann gezielt zeigen
+            for w in (chambers_cap, chambers_loaded, mag_inserted,
+                      mag_cap, mag_count, proj_loaded, proj_type):
+                w.setVisible(False)
+            if cat == "Schusswaffe":
+                for w in (chambers_cap, chambers_loaded, mag_inserted, mag_cap, mag_count):
+                    w.setVisible(True)
+            elif cat in ("Natural", "Explosivwaffe"):
+                for w in (proj_loaded, proj_type):
+                    w.setVisible(True)
 
-        remove_button = QPushButton("- Item entfernen")
-        remove_button.clicked.connect(lambda _, item=item_name: self.remove_item(item))
-        item_layout.addWidget(remove_button)
+        weapon_cb.stateChanged.connect(on_weapon_toggle)
+        cat_combo.currentTextChanged.connect(on_category_changed)
 
-        # In Layout einfügen
-        item_group.setLayout(item_layout)
+        # --- Buttons ---
+        add_attr_btn = QPushButton("+ Neue Eigenschaft")
+        add_attr_btn.clicked.connect(lambda _, n=item_name: self.add_attribute(n))
+        remove_btn = QPushButton("– Item entfernen")
+        remove_btn.clicked.connect(lambda _, n=item_name: self.remove_item(n))
+
+        # --- Aufbau ---
+        vbox.addWidget(weapon_cb)
+        vbox.addLayout(dmg_row)
+        vbox.addLayout(cat_row)
+        vbox.addLayout(state_layout)
+        vbox.addWidget(add_attr_btn)
+        vbox.addWidget(remove_btn)
+
+        group.setLayout(vbox)
         insert_pos = max(0, parent.items_layout.count() - 2)
-        parent.items_layout.insertWidget(insert_pos, item_group)
+        parent.items_layout.insertWidget(insert_pos, group)
 
-        # Optional global speichern
+        # --- Referenzen speichern ---
+        parent.item_groups[item_name].update({
+            "is_weapon_checkbox": weapon_cb,
+            "damage_field": dmg_field,
+            "weapon_category_combo": cat_combo,
+            "chambers_capacity_spin": chambers_cap,
+            "chambers_loaded_spin": chambers_loaded,
+            "magazine_inserted_cb": mag_inserted,
+            "magazine_capacity_spin": mag_cap,
+            "magazine_count_spin": mag_count,
+            "projectiles_loaded_spin": proj_loaded,
+            "projectile_type_input": proj_type,
+        })
+
+        # optional global speichern
         if parent.save_new_items_globally_checkbox.isChecked():
             self._save_item_to_global_library(item_name)
 

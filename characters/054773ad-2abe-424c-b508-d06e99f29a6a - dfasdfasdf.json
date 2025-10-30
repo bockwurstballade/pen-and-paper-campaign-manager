@@ -1,0 +1,57 @@
+{
+    "id": "054773ad-2abe-424c-b508-d06e99f29a6a",
+    "name": "dfasdfasdf",
+    "class": "",
+    "gender": "Männlich",
+    "age": 42,
+    "hitpoints": 100,
+    "base_damage": "",
+    "build": "",
+    "religion": "",
+    "occupation": "",
+    "marital_status": "Verheiratet",
+    "skills": {
+        "Handeln": {
+            "Schießen": 70
+        },
+        "Wissen": {},
+        "Soziales": {}
+    },
+    "category_scores": {
+        "Handeln": 7,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "inspiration_points": {
+        "Handeln": 1,
+        "Wissen": 0,
+        "Soziales": 0
+    },
+    "items": {
+        "G36": {
+            "attributes": {},
+            "id": null,
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": "",
+            "weapon_category": null,
+            "weapon_state": {
+                "chambers": 1,
+                "chambers_capacity": 1,
+                "magazine": {
+                    "inserted": true,
+                    "count": 28,
+                    "capacity": 30
+                },
+                "projectiles_loaded": 0,
+                "projectile_type": "5,x56x45mm"
+            }
+        }
+    },
+    "conditions": {},
+    "description": "",
+    "role": "pc",
+    "armor_enabled": true,
+    "armor_value": 5,
+    "armor_condition": 9
+}

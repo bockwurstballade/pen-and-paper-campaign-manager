@@ -1,7 +1,7 @@
 {
     "items": [
         {
-            "id": "1e6b7896-3b69-4848-a2d6-c84422d33b0c",
+            "id": "e6d42112-4eab-4ab1-b620-1bd379b280e6",
             "name": "G36",
             "description": "",
             "attributes": {},
@@ -9,16 +9,6 @@
             "is_weapon": false,
             "damage_formula": "",
             "weapon_category": null
-        },
-        {
-            "id": "1865651d-159c-4dc1-80ed-bdf0fdf0ea6c",
-            "name": "37",
-            "description": "",
-            "attributes": {},
-            "linked_conditions": [],
-            "is_weapon": true,
-            "damage_formula": "7W10",
-            "weapon_category": "Schusswaffe"
         }
     ]
 }

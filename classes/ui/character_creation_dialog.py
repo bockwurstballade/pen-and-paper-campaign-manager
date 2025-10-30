@@ -6,7 +6,7 @@ import uuid
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
     QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
+    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea, QSpinBox
 )
 from PyQt6.QtCore import Qt
 
@@ -246,75 +246,6 @@ class CharacterCreationDialog(QDialog):
                 font-weight: bold;
             }
         """)
-
-    def upsert_items_to_global_library(self):
-        """
-        Schreibt alle aktuell im Dialog befindlichen Items in die items.json zurück:
-        - aktualisiert bestehende Einträge (per id, Fallback per Name),
-        - ergänzt neue,
-        - übernimmt is_weapon, damage_formula, weapon_category und attributes.
-        Nur, wenn die Checkbox 'save_new_items_globally_checkbox' aktiv ist.
-        """
-        parent = self.parent
-        # Falls Checkbox fehlt oder deaktiviert ist: nichts tun
-        if not getattr(parent, "save_new_items_globally_checkbox", None):
-            return
-        if not parent.save_new_items_globally_checkbox.isChecked():
-            return
-
-        path = "items.json"
-        items_list = []
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    content = json.load(f)
-                    items_list = content.get("items", [])
-            except Exception:
-                items_list = []
-
-        # Indizes für Update
-        by_id = {it.get("id"): it for it in items_list if it.get("id")}
-        by_name = {it.get("name"): it for it in items_list if it.get("name")}
-
-        changed = False
-
-        for item_name, data in parent.item_groups.items():
-            # UI-Felder auslesen, wenn vorhanden
-            cb = data.get("is_weapon_checkbox")
-            dmg_field = data.get("damage_field")
-            cat_combo = data.get("weapon_category_combo")
-
-            is_weapon = bool(cb.isChecked()) if cb is not None else bool(data.get("is_weapon", False))
-            damage_formula = (dmg_field.text().strip() if dmg_field is not None else data.get("damage_formula", "")) if is_weapon else ""
-            weapon_category = (cat_combo.currentText() if cat_combo is not None else data.get("weapon_category")) if is_weapon else None
-
-            record = {
-                "id": data.get("id") or str(uuid.uuid4()),
-                "name": item_name,
-                "description": "",
-                "attributes": data.get("attributes", {}),
-                "linked_conditions": data.get("linked_conditions", []),
-                "is_weapon": is_weapon,
-                "damage_formula": damage_formula,
-                "weapon_category": weapon_category,
-            }
-
-            target = None
-            if record["id"] in by_id:
-                target = by_id[record["id"]]
-            elif item_name in by_name:
-                target = by_name[item_name]
-
-            if target:
-                target.update(record)
-                changed = True
-            else:
-                items_list.append(record)
-                changed = True
-
-        if changed:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
 
 
     def attach_item_conditions(self, item_name, condition_ids):
@@ -727,6 +658,17 @@ class CharacterCreationDialog(QDialog):
                     "is_weapon": is_weapon,
                     "damage_formula": damage_formula,
                     "weapon_category": weapon_category,
+                    "weapon_state": {
+                        "chambers": data.get("chambers_loaded_spin").value() if data.get("chambers_loaded_spin") else 0,
+                        "chambers_capacity": data.get("chambers_capacity_spin").value() if data.get("chambers_capacity_spin") else 0,
+                        "magazine": {
+                            "inserted": data.get("magazine_inserted_cb").isChecked() if data.get("magazine_inserted_cb") else False,
+                            "count": data.get("magazine_count_spin").value() if data.get("magazine_count_spin") else 0,
+                            "capacity": data.get("magazine_capacity_spin").value() if data.get("magazine_capacity_spin") else 0,
+                        },
+                        "projectiles_loaded": data.get("projectiles_loaded_spin").value() if data.get("projectiles_loaded_spin") else 0,
+                        "projectile_type": data.get("projectile_type_input").text().strip() if data.get("projectile_type_input") else "",
+                    }
                 }
 
 
@@ -928,6 +870,60 @@ class CharacterCreationDialog(QDialog):
 
             weapon_category_combo.setCurrentText(item_info.get("weapon_category", "Sonstiges"))
 
+
+            # --- Erstes self.item_groups-Dict anlegen (damit Key existiert!) ---
+            self.item_groups[item_name] = {
+                "attributes": dict(attrs),
+                "layout": item_layout,
+                "group": item_group,
+                "id": item_uuid,
+                "weapon_category_combo": weapon_category_combo,
+                "linked_conditions": linked_conditions
+}
+
+            weapon_state = item_info.get("weapon_state", {})
+
+            # vorhandene State-Widgets (sofern du sie später nutzt)
+            chambers_capacity_spin = QSpinBox(); chambers_capacity_spin.setRange(0,10)
+            chambers_loaded_spin = QSpinBox(); chambers_loaded_spin.setRange(0,10)
+            magazine_inserted_cb = QCheckBox("Magazin eingelegt")
+            magazine_capacity_spin = QSpinBox(); magazine_capacity_spin.setRange(0,200)
+            magazine_count_spin = QSpinBox(); magazine_count_spin.setRange(0,200)
+            projectiles_loaded_spin = QSpinBox(); projectiles_loaded_spin.setRange(0,10)
+            projectile_type_input = QLineEdit()
+
+            # Werte setzen
+            chambers_capacity_spin.setValue(weapon_state.get("chambers_capacity", 0))
+            chambers_loaded_spin.setValue(weapon_state.get("chambers", 0))
+            magazine_inserted_cb.setChecked(weapon_state.get("magazine", {}).get("inserted", False))
+            magazine_capacity_spin.setValue(weapon_state.get("magazine", {}).get("capacity", 0))
+            magazine_count_spin.setValue(weapon_state.get("magazine", {}).get("count", 0))
+            projectiles_loaded_spin.setValue(weapon_state.get("projectiles_loaded", 0))
+            projectile_type_input.setText(weapon_state.get("projectile_type", ""))
+
+            # layout
+            state_layout = QFormLayout()
+            state_layout.addRow("Kammern (max):", chambers_capacity_spin)
+            state_layout.addRow("Kammern geladen:", chambers_loaded_spin)
+            state_layout.addRow(magazine_inserted_cb)
+            state_layout.addRow("Magazin Kapazität:", magazine_capacity_spin)
+            state_layout.addRow("Magazin aktuell:", magazine_count_spin)
+            state_layout.addRow("Proj. geladen:", projectiles_loaded_spin)
+            state_layout.addRow("Proj. Typ:", projectile_type_input)
+            item_layout.addLayout(state_layout)
+
+            # Referenzen speichern (damit Save wieder funktioniert)
+            self.item_groups[item_name].update({
+                "chambers_capacity_spin": chambers_capacity_spin,
+                "chambers_loaded_spin": chambers_loaded_spin,
+                "magazine_inserted_cb": magazine_inserted_cb,
+                "magazine_capacity_spin": magazine_capacity_spin,
+                "magazine_count_spin": magazine_count_spin,
+                "projectiles_loaded_spin": projectiles_loaded_spin,
+                "projectile_type_input": projectile_type_input,
+            })
+
+
             weapon_category_label.setVisible(is_weapon)
             weapon_category_combo.setVisible(is_weapon)
             damage_input.setPlaceholderText("z. B. 2W10+5")
@@ -967,16 +963,15 @@ class CharacterCreationDialog(QDialog):
             item_layout.addWidget(remove_button)
             item_group.setLayout(item_layout)
 
-            self.item_groups[item_name] = {
-                "attributes": dict(attrs),
-                "layout": item_layout,
-                "group": item_group,
-                "id": item_uuid,
-                "weapon_category_combo": weapon_category_combo,
-                "linked_conditions": linked_conditions
-            }
-
-            self.item_condition_links[item_name] = linked_conditions
+            # --- Sichtbarkeit der State-Felder je nach Kategorie ---
+            weapon_category = item_info.get("weapon_category", "")
+            if weapon_category == "Schusswaffe":
+                for w in (chambers_capacity_spin, chambers_loaded_spin,
+                        magazine_inserted_cb, magazine_capacity_spin, magazine_count_spin):
+                    w.setVisible(True)
+            elif weapon_category in ("Natural", "Explosivwaffe"):
+                for w in (projectiles_loaded_spin, projectile_type_input):
+                    w.setVisible(True)
 
         # Zustands-Tracking komplett neu aufsetzen
         self.active_condition_by_id = {}
