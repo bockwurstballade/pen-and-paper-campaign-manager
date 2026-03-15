@@ -14,7 +14,7 @@ from classes.core.character_calculator import CharacterCalculator
 from classes.core.dice.roll.evaluate import DiceRollEvaluator
 
 ## eigene Funktionen
-from utils.functions.metadata import load_all_characters_from_folder
+from classes.core.data_manager import DataManager
 from utils.functions.math import kaufmaennisch_runden
 
 class DiceRollDialog(QDialog):
@@ -23,7 +23,7 @@ class DiceRollDialog(QDialog):
         self.setWindowTitle("Würfelprobe")
         self.setGeometry(300, 300, 400, 300)
 
-        self.characters = load_all_characters_from_folder()
+        self.characters = DataManager.get_all_characters()
         self.current_char = None  # dict mit allen Daten des ausgewählten Charakters
         self.char_effective = None  # vorberechnete Strukturen (siehe unten)
 

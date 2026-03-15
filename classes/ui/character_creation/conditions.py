@@ -10,6 +10,7 @@ import os
 import json
 import uuid
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
+from classes.core.data_manager import DataManager
 
 
 class CharacterCreationDialogConditions:
@@ -20,7 +21,9 @@ class CharacterCreationDialogConditions:
     # 🧠 Hilfsmethode: prüft, ob ein Zustand auf diesen Charakter passt
     # -----------------------------------------------------
     def _is_condition_target_valid_for_this_character(self, effect_target: str) -> bool:
-        parent = self.parent
+        # parent is ConditionsWidget, its parent is the CharacterCreationDialog
+        main_dialog = getattr(self.parent, "main_dialog", None) or self.parent
+
         if not effect_target or effect_target == "(kein Ziel / n/a)":
             return True
         if effect_target == "Lebenspunkte":
@@ -44,12 +47,13 @@ class CharacterCreationDialogConditions:
     # -----------------------------------------------------
     def add_condition(self):
         parent = self.parent
+        main_dialog = getattr(parent, "main_dialog", None) or parent
 
         # verfügbare Ziele basierend auf Charakterdaten
         skill_targets, cat_targets, insp_targets = self._build_condition_target_lists()
 
         dlg = ConditionEditorDialog(
-            parent=parent,
+            parent=main_dialog,
             available_skill_targets=skill_targets,
             available_category_targets=cat_targets,
             available_inspiration_targets=insp_targets
@@ -60,13 +64,7 @@ class CharacterCreationDialogConditions:
             return
 
         # Zustand speichern oder rekonstruieren
-        cond_list = []
-        if os.path.exists("conditions.json"):
-            try:
-                with open("conditions.json", "r", encoding="utf-8") as f:
-                    cond_list = json.load(f).get("conditions", [])
-            except Exception:
-                pass
+        cond_list = DataManager.get_all_conditions()
 
         saved_cond = next((c for c in cond_list if c.get("id") == dlg.condition_id), None)
         if not saved_cond:
@@ -86,13 +84,9 @@ class CharacterCreationDialogConditions:
     # -----------------------------------------------------
     def add_condition_from_library(self):
         parent = self.parent
-        if not os.path.exists("conditions.json"):
-            QMessageBox.warning(parent, "Fehler", "Keine conditions.json gefunden.")
-            return
 
         try:
-            with open("conditions.json", "r", encoding="utf-8") as f:
-                cond_list = json.load(f).get("conditions", [])
+            cond_list = DataManager.get_all_conditions()
         except Exception as e:
             QMessageBox.warning(parent, "Fehler", f"Fehler beim Laden von conditions.json:\n{e}")
             return
@@ -209,11 +203,16 @@ class CharacterCreationDialogConditions:
     # 🧩 Ziel-Listen aufbauen
     # -----------------------------------------------------
     def _build_condition_target_lists(self):
-        parent = self.parent
+        main_dialog = getattr(self.parent, "main_dialog", None) or self.parent
         skill_targets = []
         category_targets = []
         insp_targets = []
-        for cat, skill_list in parent.skills.items():
+        
+        # Sicherstellen, dass die Skills im main_dialog vorhanden sind
+        if not hasattr(main_dialog, "skills") or not hasattr(main_dialog.skills, "skills"):
+             return [], [], []
+
+        for cat, skill_list in main_dialog.skills.skills.items():
             for skill in skill_list:
                 skill_targets.append(f"Fertigkeit: {skill}")
             category_targets.append(f"Kategoriewert: {cat}")

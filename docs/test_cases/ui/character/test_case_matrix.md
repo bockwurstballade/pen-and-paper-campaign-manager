@@ -1,0 +1,19 @@
+# UI-Test-Matrix: Charaktererstellung & Edge Cases
+
+Diese Matrix definiert verschiedene Testfälle für Randbedingungen (Edge Cases) und Fehlerzustände während der Charaktererstellung und -verwaltung.
+
+| ID | Test-Kategorie | Szenario | Erwartetes Verhalten / Fehler-Handling | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **TC-ERR-01** | **Fähigkeiten** | *Fehlende Kategoriewerte*<br>Der Nutzer trägt einen Wert für eine spezifische Fähigkeit ein (z. B. Schwimmen 30), lässt aber den Basiswert der Kategorie (Handeln) leer. | Die UI sollte nicht abstürzen. Der Endwert der Fähigkeit wird berechnet als (0 + 30). Optional: Warnhinweis beim Speichern. | ⬜ |
+| **TC-ERR-02** | **Fähigkeiten** | *Gesamtfähigkeitspunkte überschritten*<br>Die Summe aller eingegebenen Fähigkeiten überschreitet ein pro Klasse definiertes (oder in der App als Hinweis hinterlegtes) Maximum. | Aktuell gibt es keine harte Blockade, aber die UI zeigt die Summe dynamisch an. Test: Rechnet das Info-Feld korrekt mit großen Werten (z. B. 300+400)? | ⬜ |
+| **TC-ERR-03** | **Items** | *Neues Item mit existierendem Namen*<br>Der Nutzer klickt "Neues Item", als Name wird ein exakter Name gewählt, den ein anderes lokales Item bereits hat (z. B. 2x "Fackel"). | Die UI vergibt dem alten Item idealerweise einen Index oder das neuere Item blockiert. *Testfokus:* Stürzt die App beim Generieren der Dictionary-Keys (`item_groups`) ab? | ⬜ |
+| **TC-ERR-04** | **Items** | *Item in globale Bibliothek speichern*<br>Der Nutzer legt ein neues Item mit dem Namen "Fackel" an und hat die Checkbox "In globale Sammlung speichern" aktiviert, obwohl "Fackel" in `data/items/` schon existiert. | Der `DataManager` überschreibt das bestehende Item in `data/items/` sanft oder warnt den User. Die App stürzt nicht ab. | ⬜ |
+| **TC-ERR-05** | **Zustände** | *Neuer Zustand mit existierendem Namen*<br>Der Nutzer legt manuell 2x den Zustand "Vergiftet" an. | Wie bei Items: Da der Name als Key für die `condition_groups` genutzt wird, darf die Python-Logik nicht abstürzen. | ⬜ |
+| **TC-ERR-06** | **Zustände** | *Zustand in globale Bibliothek speichern*<br>Der Nutzer speichert einen Zustand "Gute Laune", der in `data/conditions/` exakt so bereits vorkommt. | Sanftes Überschreiben ohne Crash im `DataManager`. Bestätigungs-Popup erscheint. | ⬜ |
+| **TC-ERR-07** | **Zustände** | *Verlinkung von unvollständigen Items*<br>Der Nutzer fügt ein Item aus der Sammlung hinzu, das in `data/items/` auf einen Zustandstoken (`cond_id`) verweist, der in `data/conditions/` gar nicht existiert. | Die App stürzt nicht ab. Es wird ein Dummy-Zustand `(Unbekannter Zustand ...)` angezeigt. | ⬜ |
+| **TC-ERR-08** | **Speichern** | *Kritisch fehlende Felder*<br>Der Nutzer klickt auf "Charakter Speichern", hat aber absolut keinen "Namen" eingegeben. | Der `CharacterBuilder` oder der Speicher-Dialog sollte die Datei unter einem generischen Namen (z.B. UUID oder "Unbenannt") abspeichern, ohne zu crashen. | ⬜ |
+| **TC-ERR-09** | **Laden** | *Korruptes JSON laden*<br>Eine JSON-Datei in `data/characters/` (oder in einem Kampagnenordner) wurde manuell editiert und hat Syntax-Fehler (z.B. fehlende Kommata). | Die Auswahl im Dropdown-Menü fängt den Lese-Fehler ab (oder `DataManager`), warnt per Popup und die App stürzt nicht (`Aborted (core dumped)`) ab. | ⬜ |
+| **TC-ERR-10** | **UI/Inputs** | *Falsche Datentypen*<br>Der Nutzer tippt Buchstaben in numerische Felder (z.B. "zwanzig" bei Alter oder Lebenspunkten). | `ValueError`s werden stillschweigend abgefangen (z. B. durch Setzen des Werts auf 0) und die App stürzt nicht ab. | ⬜ |
+
+### Anleitung zur Benutzung
+Wenn du einen dieser Tests durchführst, setze den Status auf `✅`, falls er erfolgreich durchläuft, oder auf `❌`, falls die Anwendung dort unerwartet abstürzt oder ein Fehlverhalten aufweist. Hinterlege im Fehlerfall ein kurzes Issue im Root-Verzeichnis.

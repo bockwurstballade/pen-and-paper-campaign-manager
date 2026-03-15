@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
 )
 from PyQt6.QtCore import Qt
+from classes.core.data_manager import DataManager
 
 class ConditionEditorDialog(QDialog):
     def __init__(self, parent=None, available_skill_targets=None,
@@ -160,33 +161,10 @@ class ConditionEditorDialog(QDialog):
             "effect_value": effect_value if effect_type != "keine Auswirkung" else 0
         }
 
-        target_file = self.loaded_file if self.loaded_file else "conditions.json"
-
-        # existierende Datei laden
-        cond_list = []
-        if os.path.exists(target_file):
-            try:
-                with open(target_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict) and "conditions" in data and isinstance(data["conditions"], list):
-                        cond_list = data["conditions"]
-            except Exception:
-                pass
-
-        # Zustand einfügen / ersetzen
-        replaced = False
-        for i, existing in enumerate(cond_list):
-            if existing.get("id") == self.condition_id:
-                cond_list[i] = cond_obj
-                replaced = True
-                break
-        if not replaced:
-            cond_list.append(cond_obj)
-
-        # zurückschreiben
-        with open(target_file, "w", encoding="utf-8") as f:
-            json.dump({"conditions": cond_list}, f, indent=4, ensure_ascii=False)
-
-        QMessageBox.information(self, "Erfolg", f"Zustand '{name}' wurde gespeichert!")
-        self.accept()
+        try:
+            DataManager.save_condition(cond_obj)
+            QMessageBox.information(self, "Erfolg", f"Zustand '{name}' wurde gespeichert!")
+            self.accept()
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Konnte Zustand nicht speichern:\n{e}")
 

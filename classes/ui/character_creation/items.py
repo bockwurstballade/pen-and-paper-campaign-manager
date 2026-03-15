@@ -11,6 +11,7 @@ import os
 import json
 import uuid
 from classes.ui.attribute_dialog import AttributeDialog
+from classes.core.data_manager import DataManager
 
 
 class CharacterCreationDialogItems:
@@ -197,27 +198,19 @@ class CharacterCreationDialogItems:
         }
 
         # 🗃️ Vorhandene Items laden
-        items_list = []
-        if os.path.exists("items.json"):
-            try:
-                with open("items.json", "r", encoding="utf-8") as f:
-                    content = json.load(f)
-                    items_list = content.get("items", [])
-            except Exception:
-                pass
+        items_list = DataManager.get_all_items()
 
         # Doppelte vermeiden
         for existing in items_list:
             if existing.get("name") == item_name:
-                QMessageBox.information(parent, "Hinweis", f"Item '{item_name}' existiert bereits in items.json.")
+                QMessageBox.information(parent, "Hinweis", f"Item '{item_name}' existiert bereits in der Bibliothek.")
                 return
 
-        # Neues Item hinzufügen und speichern
-        items_list.append(item_obj)
-        with open("items.json", "w", encoding="utf-8") as f:
-            json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
-
-        QMessageBox.information(parent, "Gespeichert", f"Item '{item_name}' wurde auch in items.json gespeichert.")
+        try:
+            DataManager.save_item(item_obj)
+            QMessageBox.information(parent, "Gespeichert", f"Item '{item_name}' wurde in die Bibliothek gespeichert.")
+        except Exception as e:
+            QMessageBox.warning(parent, "Fehler", f"Konnte Item nicht speichern:\n{e}")
 
     # -----------------------------------------------------
     # 🧩 Neue Eigenschaft hinzufügen
@@ -266,15 +259,7 @@ class CharacterCreationDialogItems:
         if not parent.save_new_items_globally_checkbox.isChecked():
             return
 
-        path = "items.json"
-        items_list = []
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    content = json.load(f)
-                    items_list = content.get("items", [])
-            except Exception:
-                items_list = []
+        items_list = DataManager.get_all_items()
 
         # Indizes für Update
         by_id = {it.get("id"): it for it in items_list if it.get("id")}
@@ -311,14 +296,9 @@ class CharacterCreationDialogItems:
 
             if target:
                 target.update(record)
-                changed = True
+                DataManager.save_item(target)
             else:
-                items_list.append(record)
-                changed = True
-
-        if changed:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
+                DataManager.save_item(record)
 
     # -----------------------------------------------------
     # 🧩 Item aus Bibliothek hinzufügen
@@ -326,14 +306,8 @@ class CharacterCreationDialogItems:
     def add_item_from_library(self):
         parent = self.parent
 
-        if not os.path.exists("items.json"):
-            QMessageBox.warning(parent, "Fehler", "Keine items.json gefunden.")
-            return
-
         try:
-            with open("items.json", "r", encoding="utf-8") as f:
-                data = json.load(f)
-                items_list = data.get("items", [])
+            items_list = DataManager.get_all_items()
         except Exception as e:
             QMessageBox.warning(parent, "Fehler", f"Fehler beim Laden von items.json:\n{e}")
             return
@@ -396,16 +370,19 @@ class CharacterCreationDialogItems:
     # -----------------------------------------------------
     def remove_item_and_detach_conditions(self, item_name):
         parent = self.parent
+        main_dialog = getattr(parent, "main_dialog", None) or parent # Fallback falls wir schon im MainDialog sind
+
         if item_name not in parent.item_groups:
             return
 
         linked_conds = parent.item_groups[item_name].get("linked_conditions", [])
-        for cid in linked_conds:
-            if cid in parent.condition_refcount:
-                parent.condition_refcount[cid] -= 1
-                if parent.condition_refcount[cid] <= 0:
-                    parent.condition_refcount.pop(cid, None)
-                    parent.remove_condition_widget_by_id(cid)
+        if hasattr(main_dialog, "condition_refcount"):
+            for cid in linked_conds:
+                if cid in main_dialog.condition_refcount:
+                    main_dialog.condition_refcount[cid] -= 1
+                    if main_dialog.condition_refcount[cid] <= 0:
+                        main_dialog.condition_refcount.pop(cid, None)
+                        main_dialog.remove_condition_widget_by_id(cid)
 
         item_group = parent.item_groups[item_name]["group"]
         parent.items_layout.removeWidget(item_group)
@@ -415,5 +392,145 @@ class CharacterCreationDialogItems:
         if item_name in parent.item_condition_links:
             del parent.item_condition_links[item_name]
 
-        parent.recalculate_conditions_effects()
+        if hasattr(main_dialog, "recalculate_conditions_effects"):
+            main_dialog.recalculate_conditions_effects()
+        
         QMessageBox.information(parent, "Erfolg", f"Item '{item_name}' wurde entfernt.")
+
+    def restore_items_from_data(self, items_saved_data):
+        """Builds the UI block for items from a loaded JSON dict. Formally in CharacterCreationDialog."""
+        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QFormLayout, QLabel, QCheckBox, QLineEdit, QComboBox, QHBoxLayout, QPushButton, QSpinBox
+        import uuid
+        parent = self.parent
+
+        for item_name, item_info in items_saved_data.items():
+            attrs = item_info.get("attributes", {})
+            item_uuid = item_info.get("id", str(uuid.uuid4()))
+            linked_conditions = item_info.get("linked_conditions", [])
+
+            item_group = QGroupBox(item_name)
+            item_layout = QVBoxLayout()
+
+            attr_layout = QFormLayout()
+            for attr_name, attr_value in attrs.items():
+                attr_layout.addRow(f"{attr_name}:", QLabel(str(attr_value)))
+
+            # --- Waffenbereich ---
+            is_weapon = item_info.get("is_weapon", False)
+            damage_formula = item_info.get("damage_formula", "")
+            weapon_checkbox = QCheckBox("Dieses Item ist eine Waffe")
+            weapon_checkbox.setChecked(is_weapon)
+
+            damage_input = QLineEdit()
+            weapon_category_label = QLabel("Waffenkategorie:")
+            weapon_category_combo = QComboBox()
+            weapon_category_combo.addItems(self.WEAPON_CATEGORIES)
+            
+            parent.items_layout.insertWidget(parent.items_layout.count() - 2, item_group)
+            weapon_category_combo.setCurrentText(item_info.get("weapon_category", "Sonstiges"))
+
+            # --- Erstes self.item_groups-Dict anlegen ---
+            parent.item_groups[item_name] = {
+                "attributes": dict(attrs),
+                "layout": item_layout,
+                "group": item_group,
+                "id": item_uuid,
+                "weapon_category_combo": weapon_category_combo,
+                "linked_conditions": linked_conditions
+            }
+
+            weapon_state = item_info.get("weapon_state", {})
+
+            # vorhandene State-Widgets
+            chambers_capacity_spin = QSpinBox(); chambers_capacity_spin.setRange(0,10)
+            chambers_loaded_spin = QSpinBox(); chambers_loaded_spin.setRange(0,10)
+            magazine_inserted_cb = QCheckBox("Magazin eingelegt")
+            magazine_capacity_spin = QSpinBox(); magazine_capacity_spin.setRange(0,200)
+            magazine_count_spin = QSpinBox(); magazine_count_spin.setRange(0,200)
+            projectiles_loaded_spin = QSpinBox(); projectiles_loaded_spin.setRange(0,10)
+            projectile_type_input = QLineEdit()
+
+            # Werte setzen
+            chambers_capacity_spin.setValue(weapon_state.get("chambers_capacity", 0))
+            chambers_loaded_spin.setValue(weapon_state.get("chambers", 0))
+            magazine_inserted_cb.setChecked(weapon_state.get("magazine", {}).get("inserted", False))
+            magazine_capacity_spin.setValue(weapon_state.get("magazine", {}).get("capacity", 0))
+            magazine_count_spin.setValue(weapon_state.get("magazine", {}).get("count", 0))
+            projectiles_loaded_spin.setValue(weapon_state.get("projectiles_loaded", 0))
+            projectile_type_input.setText(weapon_state.get("projectile_type", ""))
+
+            # layout
+            state_layout = QFormLayout()
+            state_layout.addRow("Kammern (max):", chambers_capacity_spin)
+            state_layout.addRow("Kammern geladen:", chambers_loaded_spin)
+            state_layout.addRow(magazine_inserted_cb)
+            state_layout.addRow("Magazin Kapazität:", magazine_capacity_spin)
+            state_layout.addRow("Magazin aktuell:", magazine_count_spin)
+            state_layout.addRow("Proj. geladen:", projectiles_loaded_spin)
+            state_layout.addRow("Proj. Typ:", projectile_type_input)
+            item_layout.addLayout(state_layout)
+
+            # Referenzen speichern
+            parent.item_groups[item_name].update({
+                "chambers_capacity_spin": chambers_capacity_spin,
+                "chambers_loaded_spin": chambers_loaded_spin,
+                "magazine_inserted_cb": magazine_inserted_cb,
+                "magazine_capacity_spin": magazine_capacity_spin,
+                "magazine_count_spin": magazine_count_spin,
+                "projectiles_loaded_spin": projectiles_loaded_spin,
+                "projectile_type_input": projectile_type_input,
+                "is_weapon_checkbox": weapon_checkbox,
+                "damage_field": damage_input,
+            })
+
+            weapon_category_label.setVisible(is_weapon)
+            weapon_category_combo.setVisible(is_weapon)
+            damage_input.setPlaceholderText("z. B. 2W10+5")
+            damage_input.setText(damage_formula)
+            damage_row = QHBoxLayout()
+            damage_row.addWidget(QLabel("Schadensformel:"))
+            damage_row.addWidget(damage_input)
+            weapon_cat_row = QHBoxLayout()
+            weapon_cat_row.addWidget(weapon_category_label)
+            weapon_cat_row.addWidget(weapon_category_combo)
+            item_layout.addWidget(weapon_checkbox)
+            item_layout.addLayout(damage_row)
+            item_layout.addLayout(weapon_cat_row)
+            damage_input.setVisible(is_weapon)
+
+            def on_weapon_toggle(state, dmg_input=damage_input, cat_label=weapon_category_label, cat_combo=weapon_category_combo):
+                from PyQt6.QtCore import Qt
+                is_checked = state == Qt.CheckState.Checked.value
+                dmg_input.setVisible(is_checked)
+                cat_label.setVisible(is_checked)
+                cat_combo.setVisible(is_checked)
+
+            from PyQt6.QtCore import Qt
+            on_weapon_toggle(Qt.CheckState.Checked.value if is_weapon else Qt.CheckState.Unchecked.value)
+            weapon_checkbox.stateChanged.connect(on_weapon_toggle)
+
+            add_attr_button = QPushButton("+ Neue Eigenschaft")
+            add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
+
+            remove_button = QPushButton("- Item entfernen")
+            remove_button.clicked.connect(lambda _, item=item_name: self.remove_item_and_detach_conditions(item))
+
+            item_layout.addLayout(attr_layout)
+            item_layout.addWidget(add_attr_button)
+            item_layout.addWidget(remove_button)
+            item_group.setLayout(item_layout)
+
+            # --- Sichtbarkeit der State-Felder je nach Kategorie ---
+            weapon_category = item_info.get("weapon_category", "")
+            if weapon_category == "Schusswaffe":
+                for w in (chambers_capacity_spin, chambers_loaded_spin,
+                        magazine_inserted_cb, magazine_capacity_spin, magazine_count_spin):
+                    w.setVisible(True)
+            elif weapon_category in ("Natural", "Explosivwaffe"):
+                for w in (projectiles_loaded_spin, projectile_type_input):
+                    w.setVisible(True)
+
+            # Link info
+            if linked_conditions:
+                parent.item_condition_links[item_name] = linked_conditions
+

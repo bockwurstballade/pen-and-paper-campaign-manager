@@ -17,6 +17,8 @@ from classes.ui.combat_dialog import CombatDialog
 from classes.ui.character_creation_dialog import CharacterCreationDialog
 from classes.ui.item_editor_dialog import ItemEditorDialog
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
+from classes.ui.campaign_creation_dialog import CampaignCreationDialog
+from classes.core.data_manager import DataManager
 
 class WelcomeWindow(QMainWindow):
     """
@@ -31,6 +33,7 @@ class WelcomeWindow(QMainWindow):
         ("Bestehendes Item laden", "load_item"),
         ("Neuen Zustand erstellen", "create_new_condition"),
         ("Bestehenden Zustand laden", "load_condition"),
+        ("Neue Kampagne erstellen", "start_campaign_creation"),
         ("Würfelprobe", "open_roll_dialog"),
         ("Kampf starten", "start_combat"),
     ]
@@ -102,32 +105,24 @@ class WelcomeWindow(QMainWindow):
         skill_set = set()
         category_set = set()
 
-        characters_dir = "characters"
-        if os.path.isdir(characters_dir):
-            for fname in os.listdir(characters_dir):
-                if not fname.lower().endswith(".json"):
-                    continue
-                full_path = os.path.join(characters_dir, fname)
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                except Exception:
-                    continue  # kaputte Datei ignorieren
+        # Nutze den neuen DataManager
+        chars = DataManager.get_all_characters()
+        for char_info in chars:
+            data = char_info["data"]
+            # skills ist wie:
+            # {
+            #   "Handeln": {"Schleichen": 35, "Klettern": 20},
+            #   "Wissen": {...},
+            #   "Soziales": {...}
+            # }
+            skills_block = data.get("skills", {})
+            for category_name, skills_dict in skills_block.items():
+                # Kategorie merken
+                category_set.add(category_name)
 
-                # skills ist wie:
-                # {
-                #   "Handeln": {"Schleichen": 35, "Klettern": 20},
-                #   "Wissen": {...},
-                #   "Soziales": {...}
-                # }
-                skills_block = data.get("skills", {})
-                for category_name, skills_dict in skills_block.items():
-                    # Kategorie merken
-                    category_set.add(category_name)
-
-                    # Skills merken
-                    for skill_name in skills_dict.keys():
-                        skill_set.add(skill_name)
+                # Skills merken
+                for skill_name in skills_dict.keys():
+                    skill_set.add(skill_name)
 
         # Jetzt Listen im passenden Format bauen
         skill_targets = [f"Fertigkeit: {skill}" for skill in sorted(skill_set)]
@@ -147,40 +142,18 @@ class WelcomeWindow(QMainWindow):
         dialog.char_id = str(uuid.uuid4())  # neue frische ID vergeben
         dialog.exec()
 
+    def start_campaign_creation(self):
+        dialog = CampaignCreationDialog(self)
+        dialog.exec()
 
     def load_character(self):
-        # Verzeichnis sicherstellen
-        if not os.path.exists("characters"):
-            QMessageBox.information(self, "Hinweis", "Es wurden noch keine Charaktere gespeichert.")
-            return
-
-        # Alle JSON-Dateien einsammeln
-        candidates = []
-        for fname in os.listdir("characters"):
-            if fname.lower().endswith(".json"):
-                full_path = os.path.join("characters", fname)
-                try:
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-
-                    # wir erwarten ein einzelnes Charakter-Objekt (unser neues Format)
-                    char_name = data.get("name", "(unbenannt)")
-                    char_class = data.get("class", "?")
-                    char_age = data.get("age", "?")
-                    char_id = data.get("id", "???")
-
-                    display = f"{char_name} | {char_class}, {char_age} Jahre [{char_id[:8]}...]"
-                    candidates.append((display, full_path, data))
-                except Exception:
-                    # Datei ignorieren, wenn sie nicht lesbar ist
-                    pass
-
+        candidates = DataManager.get_all_characters()
         if not candidates:
-            QMessageBox.information(self, "Hinweis", "Keine gültigen Charakterdateien gefunden.")
+            QMessageBox.information(self, "Hinweis", "Es wurden noch keine Charaktere gespeichert oder sie konnten nicht geladen werden.")
             return
 
         # Liste der Anzeigenamen für Auswahl
-        display_names = [c[0] for c in candidates]
+        display_names = [c["display"] for c in candidates]
 
         choice, ok = QInputDialog.getItem(
             self,
@@ -194,7 +167,8 @@ class WelcomeWindow(QMainWindow):
             return
 
         idx = display_names.index(choice)
-        chosen_display, chosen_path, chosen_data = candidates[idx]
+        chosen = candidates[idx]
+        chosen_display, chosen_path, chosen_data = chosen["display"], chosen["path"], chosen["data"]
 
         # Dialog öffnen und Daten rein
         dialog = CharacterCreationDialog(self)
@@ -224,21 +198,9 @@ class WelcomeWindow(QMainWindow):
         if not file_name:
             return
 
-        try:
-            with open(file_name, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden der Datei:\n{e}")
-            return
-
-        # Erwartet { "items": [ {...}, {...} ] }
-        if not (isinstance(data, dict) and "items" in data and isinstance(data["items"], list)):
-            QMessageBox.warning(self, "Fehler", "In der ausgewählten Datei wurden keine Items gefunden.")
-            return
-
-        items_list = data["items"]
+        items_list = DataManager.get_all_items(file_name)
         if not items_list:
-            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Items.")
+            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Items oder konnte nicht korrekt gelesen werden.")
             return
 
         # Falls mehrere Items drin sind: den Nutzer auswählen lassen
@@ -290,21 +252,9 @@ class WelcomeWindow(QMainWindow):
         if not file_name:
             return
 
-        try:
-            with open(file_name, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception as e:
-            QMessageBox.warning(self, "Fehler", f"Fehler beim Laden der Datei:\n{e}")
-            return
-
-        # erwartet { "conditions": [ {...}, {...} ] }
-        if not (isinstance(data, dict) and "conditions" in data and isinstance(data["conditions"], list)):
-            QMessageBox.warning(self, "Fehler", "In der ausgewählten Datei wurden keine Zustände gefunden.")
-            return
-
-        conditions_list = data["conditions"]
+        conditions_list = DataManager.get_all_conditions(file_name)
         if not conditions_list:
-            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Zustände.")
+            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Zustände oder konnte nicht gelesen werden.")
             return
 
         # Auswahl anzeigen

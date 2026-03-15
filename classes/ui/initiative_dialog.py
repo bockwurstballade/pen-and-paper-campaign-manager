@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt
 
 ## eigene Funktionen
 from utils.functions.math import kaufmaennisch_runden
+from classes.core.data_manager import DataManager
 
 
 class InitiativeDialog(QDialog):
@@ -168,23 +169,7 @@ class InitiativeDialog(QDialog):
 
     def get_handeln_value(self, char_id):
         """Lädt den Charakter und berechnet den aktuellen Handeln-Wert"""
-        char_file = None
-        folder = "characters"
-        if not os.path.exists(folder):
-            return 0
-        for fname in os.listdir(folder):
-            if not fname.lower().endswith(".json"):
-                continue
-            full_path = os.path.join(folder, fname)
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if data.get("id") == char_id:
-                        char_file = data
-                        break
-            except Exception:
-                continue
-
+        char_file = DataManager.get_character_by_id(char_id)
         if not char_file:
             return 0
 
@@ -199,18 +184,7 @@ class InitiativeDialog(QDialog):
 
     def get_character_role(self, char_id):
         """Liest aus dem gespeicherten Charakter, ob es ein PC oder NSC ist"""
-        folder = "characters"
-        if not os.path.exists(folder):
-            return "npc"
-        for fname in os.listdir(folder):
-            if not fname.lower().endswith(".json"):
-                continue
-            full_path = os.path.join(folder, fname)
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if data.get("id") == char_id:
-                        return data.get("role", "npc")
-            except Exception:
-                continue
+        char_data = DataManager.get_character_by_id(char_id)
+        if char_data:
+            return char_data.get("role", "npc")
         return "npc"

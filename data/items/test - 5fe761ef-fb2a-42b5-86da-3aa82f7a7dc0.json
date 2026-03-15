@@ -1,0 +1,9 @@
+{
+    "id": "5fe761ef-fb2a-42b5-86da-3aa82f7a7dc0",
+    "name": "test",
+    "description": "test",
+    "attributes": {},
+    "is_weapon": false,
+    "damage_formula": "",
+    "linked_conditions": []
+}

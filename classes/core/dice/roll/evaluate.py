@@ -1,5 +1,4 @@
 from typing import Dict, TypedDict
-from typing_extensions import TypedDict  # Falls TypedDict in älteren Python-Versionen benötigt
 
 import logging
 
@@ -61,27 +60,14 @@ class DiceRollEvaluator:
             crit:
                 war es ein kritischer Erfolg oder Fehlschlag
         """
-       # 1) Grundchance
-        try:
-            base_chance = int(input_dict["base_chance"]) if input_dict["base_chance"] != "" else 0
-        except (ValueError, TypeError):
-            # Falls der Wert kein gültiger String für int ist, fallback auf 0
-            base_chance = 0
-
+        # 1) Grundchance
+        base_chance = int(input_dict.get("base_chance", 0))
 
         # 2) Bonus
-        try:
-            bonus = int(input_dict["bonus"]) if input_dict["bonus"] != "" else 0
-        except (ValueError, TypeError):
-            # Falls der Wert kein gültiger String für int ist, fallback auf 0
-            bonus = 0
+        bonus = int(input_dict.get("bonus", 0))
 
         # 3) Wurf
-        try:
-            rolled = int(input_dict["rolled"]) if input_dict["rolled"] != "" else 0
-        except (ValueError, TypeError):
-            # Falls der Wert kein gültiger String für int ist, fallback auf 0
-            rolled = 0
+        rolled = int(input_dict.get("rolled", 0))
 
         final_chance = base_chance + bonus
         # clamp sinnvoll? In HTBAH kann man auch theoretisch über 100 kommen (= auto success?),
@@ -98,10 +84,10 @@ class DiceRollEvaluator:
         if not (1 <= rolled <= 100):
             logger.debug(
                     "Ungültiger Würfelwert: rolled=%d. Erwartet: 1 ≤ rolled ≤ 100 (0 wird als 100 interpretiert). "
-                    "Benutzer wird per QMessageBox gewarnt.",
+                    "Ein ValueError wird geworfen.",
                     rolled
                 )
-            return
+            raise ValueError(f"Würfelwert muss zwischen 1 und 100 liegen, ist aber {rolled}.")
 
         # 4) Erfolg / Fehlschlag bestimmen
         # Erfolg, wenn roll <= final_chance

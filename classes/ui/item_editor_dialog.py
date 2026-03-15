@@ -10,8 +10,8 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-## eigene klassen
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
+from classes.core.data_manager import DataManager
 
 class ItemEditorDialog(QDialog):
     def __init__(self, parent=None):
@@ -205,15 +205,9 @@ class ItemEditorDialog(QDialog):
             self.conditions_list_label.setText("Keine Zustände verknüpft.")
             return
 
-        # conditions.json lesen, um Namen zuzuordnen
         cond_map = {}
-        if os.path.exists("conditions.json"):
-            try:
-                with open("conditions.json", "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    cond_map = {c["id"]: c for c in data.get("conditions", [])}
-            except Exception:
-                pass
+        conditions = DataManager.get_all_conditions()
+        cond_map = {c["id"]: c for c in conditions}
 
         lines = []
         for cid in self.linked_conditions:
@@ -226,15 +220,9 @@ class ItemEditorDialog(QDialog):
         self.conditions_list_label.setText("\n".join(lines))
 
     def add_existing_condition(self):
-        """Lässt den Nutzer einen bestehenden Zustand aus conditions.json auswählen und verknüpft ihn."""
-        if not os.path.exists("conditions.json"):
-            QMessageBox.warning(self, "Fehler", "Keine conditions.json gefunden.")
-            return
-
-        with open("conditions.json", "r", encoding="utf-8") as f:
-            data = json.load(f)
-            conditions = data.get("conditions", [])
-
+        """Lässt den Nutzer einen bestehenden Zustand auswählen und verknüpft ihn."""
+        conditions = DataManager.get_all_conditions()
+        
         if not conditions:
             QMessageBox.information(self, "Hinweis", "Es sind keine Zustände vorhanden.")
             return
@@ -268,18 +256,16 @@ class ItemEditorDialog(QDialog):
         dlg.condition_id = str(uuid.uuid4())
         dlg.exec()
 
-        # Versuchen, den zuletzt gespeicherten Zustand aus conditions.json zu verknüpfen
-        if os.path.exists("conditions.json"):
-            try:
-                with open("conditions.json", "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if "conditions" in data and data["conditions"]:
-                        latest = data["conditions"][-1]  # heuristik: letzter Eintrag = zuletzt gespeichert
-                        cid = latest.get("id")
-                        if cid and cid not in self.linked_conditions:
-                            self.linked_conditions.append(cid)
-            except Exception as e:
-                QMessageBox.warning(self, "Fehler", f"Konnte neuen Zustand nicht verknüpfen:\n{e}")
+        # Versuchen, den zuletzt gespeicherten Zustand zu verknüpfen
+        try:
+            conditions = DataManager.get_all_conditions()
+            if conditions:
+                latest = conditions[-1]  # heuristik: letzter Eintrag = zuletzt gespeichert
+                cid = latest.get("id")
+                if cid and cid not in self.linked_conditions:
+                    self.linked_conditions.append(cid)
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Konnte neuen Zustand nicht verknüpfen:\n{e}")
 
         self.update_condition_display()
 
@@ -291,13 +277,8 @@ class ItemEditorDialog(QDialog):
 
         # Namen zu IDs auflösen, damit der User nicht nur UUIDs sieht
         cond_map = {}
-        if os.path.exists("conditions.json"):
-            try:
-                with open("conditions.json", "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    cond_map = {c["id"]: c for c in data.get("conditions", [])}
-            except Exception:
-                pass
+        conditions = DataManager.get_all_conditions()
+        cond_map = {c["id"]: c for c in conditions}
 
         cond_choices = [
             cond_map[cid]["name"] if cid in cond_map else f"[Fehlend] {cid[:8]}..."
@@ -388,36 +369,10 @@ class ItemEditorDialog(QDialog):
             "linked_conditions": self.linked_conditions
         }
 
-        # Dateipfad bestimmen
-        target_file = self.loaded_file if self.loaded_file else "items.json"
-
-        # Bestehende Items laden (wenn Datei existiert)
-        items_list = []
-        if os.path.exists(target_file):
-            try:
-                with open(target_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict) and "items" in data and isinstance(data["items"], list):
-                        items_list = data["items"]
-            except Exception:
-                # wenn Datei kaputt ist -> starten wir leer
-                pass
-
-        # Prüfen, ob Item schon in der Liste ist -> dann ersetzen wir es
-        replaced = False
-        for idx, existing in enumerate(items_list):
-            if existing.get("id") == self.item_id:
-                items_list[idx] = item_obj
-                replaced = True
-                break
-
-        if not replaced:
-            items_list.append(item_obj)
-
-        # Zurückschreiben
-        with open(target_file, "w", encoding="utf-8") as f:
-            json.dump({"items": items_list}, f, indent=4, ensure_ascii=False)
-
-        QMessageBox.information(self, "Erfolg", f"Item '{name}' wurde gespeichert!")
-        self.accept()
+        try:
+            DataManager.save_item(item_obj)
+            QMessageBox.information(self, "Erfolg", f"Item '{name}' wurde gespeichert!")
+            self.accept()
+        except Exception as e:
+            QMessageBox.warning(self, "Fehler", f"Fehler beim Speichern des Items:\n{e}")
 
