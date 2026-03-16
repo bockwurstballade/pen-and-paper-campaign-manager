@@ -96,7 +96,7 @@ class ConditionEditorDialog(QDialog):
             return custom_text.strip() if custom_text.strip() else "(kein Ziel / n/a)"
         return choice
 
-    def load_condition_data(self, cond_data, file_path):
+    def load_condition_data(self, cond_data, file_path=None):
         """
         Lädt einen bestehenden Zustand in den Dialog.
         cond_data ist ein einzelnes Zustands-Dict (mit id, name, ...)

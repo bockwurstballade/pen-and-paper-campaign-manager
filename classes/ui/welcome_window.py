@@ -188,22 +188,13 @@ class WelcomeWindow(QMainWindow):
         dlg.exec()
 
     def load_item(self):
-        """Lädt items.json ODER eine andere Datei, lässt den Nutzer ein Item auswählen, öffnet es im Editor."""
-        file_name, _ = QFileDialog.getOpenFileName(
-            self,
-            "Item-Datei öffnen",
-            "",
-            "JSON Dateien (*.json);;Alle Dateien (*)"
-        )
-        if not file_name:
-            return
-
-        items_list = DataManager.get_all_items(file_name)
+        """Lädt alle Items aus dem data/items/ Ordner, lässt den Nutzer eines auswählen und öffnet es im Editor."""
+        items_list = DataManager.get_all_items()
         if not items_list:
-            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Items oder konnte nicht korrekt gelesen werden.")
+            QMessageBox.information(self, "Hinweis", "Es wurden noch keine Items gespeichert oder sie konnten nicht geladen werden.")
             return
 
-        # Falls mehrere Items drin sind: den Nutzer auswählen lassen
+        # Auswahl anzeigen
         item_names = [f"{it.get('name','(unbenannt)')} [{it.get('id','?')}]" for it in items_list]
         choice, ok = QInputDialog.getItem(
             self,
@@ -216,13 +207,12 @@ class WelcomeWindow(QMainWindow):
         if not ok:
             return
 
-        # anhand der Auswahl das konkrete Item raussuchen
         chosen_index = item_names.index(choice)
         chosen_item = items_list[chosen_index]
 
         # Editor öffnen und Item laden
         dlg = ItemEditorDialog(self)
-        dlg.load_item_data(chosen_item, file_name)
+        dlg.load_item_data(chosen_item)
         dlg.exec()
 
     def create_new_condition(self):
@@ -242,19 +232,10 @@ class WelcomeWindow(QMainWindow):
 
 
     def load_condition(self):
-        """Lädt eine conditions.json (oder andere Datei), lässt den Nutzer einen Zustand wählen und öffnet ihn im Editor."""
-        file_name, _ = QFileDialog.getOpenFileName(
-            self,
-            "Zustands-Datei öffnen",
-            "",
-            "JSON Dateien (*.json);;Alle Dateien (*)"
-        )
-        if not file_name:
-            return
-
-        conditions_list = DataManager.get_all_conditions(file_name)
+        """Lädt alle Zustände aus dem data/conditions/ Ordner, lässt den Nutzer einen wählen und öffnet ihn im Editor."""
+        conditions_list = DataManager.get_all_conditions()
         if not conditions_list:
-            QMessageBox.warning(self, "Fehler", "Die Datei enthält keine Zustände oder konnte nicht gelesen werden.")
+            QMessageBox.information(self, "Hinweis", "Es wurden noch keine Zustände gespeichert oder sie konnten nicht geladen werden.")
             return
 
         # Auswahl anzeigen
@@ -277,6 +258,14 @@ class WelcomeWindow(QMainWindow):
         chosen_index = cond_choices.index(choice)
         chosen_condition = conditions_list[chosen_index]
 
-        dlg = ConditionEditorDialog(self)
-        dlg.load_condition_data(chosen_condition, file_name)
+        # Ziele für den ConditionEditorDialog sammeln
+        skill_targets, cat_targets, insp_targets = self._collect_all_condition_targets_from_all_characters()
+
+        dlg = ConditionEditorDialog(
+            parent=self,
+            available_skill_targets=skill_targets,
+            available_category_targets=cat_targets,
+            available_inspiration_targets=insp_targets
+        )
+        dlg.load_condition_data(chosen_condition)
         dlg.exec()

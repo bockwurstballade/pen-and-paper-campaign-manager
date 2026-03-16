@@ -1,0 +1,14 @@
+{
+    "items": [
+        {
+            "id": "e6d42112-4eab-4ab1-b620-1bd379b280e6",
+            "name": "G36",
+            "description": "",
+            "attributes": {},
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": "",
+            "weapon_category": null
+        }
+    ]
+}

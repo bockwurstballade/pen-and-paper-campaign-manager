@@ -1,0 +1,9 @@
+{
+    "id": "45a42721-1313-4a63-888f-2bff3d008e5f",
+    "name": "G36",
+    "description": "Sturmgewehr",
+    "attributes": {},
+    "is_weapon": true,
+    "damage_formula": "7W10+1",
+    "linked_conditions": []
+}

@@ -303,7 +303,7 @@ class ItemEditorDialog(QDialog):
 
     ## LADEN UND SPEICHERN VON ITEMDATEN
 
-    def load_item_data(self, item_data, file_path):
+    def load_item_data(self, item_data, file_path=None):
         """
         Lädt bestehendes Item in den Dialog, damit es bearbeitet werden kann.
         item_data ist ein einzelnes Item-Dict (mit 'id', 'name', ...)
