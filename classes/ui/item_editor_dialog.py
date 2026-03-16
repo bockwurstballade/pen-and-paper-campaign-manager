@@ -30,7 +30,9 @@ class ItemEditorDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("Item bearbeiten / erstellen")
-        self.setGeometry(200, 200, 400, 500)
+        # Dialog etwas breiter anlegen, damit Inhalte bequem Platz haben
+        self.setMinimumSize(550, 500)
+        self.resize(650, 550)
 
         # wenn wir ein bestehendes Item laden, merken wir uns die Quelle
         self.loaded_file = None

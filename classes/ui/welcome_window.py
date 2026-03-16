@@ -56,7 +56,9 @@ class WelcomeWindow(QMainWindow):
     def _setup_window(self) -> None:
         """Konfiguriert Fenstergröße und Titel."""
         self.setWindowTitle(self.WINDOW_TITLE)
-        self.setGeometry(100, 100, 400, 300)
+        # Etwas breiteres Standardfenster und sinnvolle Mindestgröße
+        self.setMinimumSize(600, 400)
+        self.resize(800, 500)
     def _setup_ui(self) -> None:
         """Erstellt zentrale Widgets, Layout und Inhalte."""
         central_widget = QWidget()

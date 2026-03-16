@@ -36,7 +36,9 @@ class CharacterCreationDialog(QDialog):
 
         super().__init__(parent)
         self.setWindowTitle("Neuen Charakter erstellen")
-        self.setGeometry(150, 150, 500, 700)
+        # Großzügigere Mindest- und Startgröße, damit der Inhalt nicht gequetscht wird.
+        self.setMinimumSize(800, 600)
+        self.resize(900, 700)
 
         # ---------- SCROLL WRAPPER ----------
         # Das äußere Layout gehört dem Dialog selbst

@@ -19,7 +19,9 @@ class ConditionEditorDialog(QDialog):
         super().__init__(parent)
 
         self.setWindowTitle("Zustand bearbeiten / erstellen")
-        self.setGeometry(250, 250, 450, 400)
+        # Dialog etwas breiter anlegen, damit Labels und Comboboxen nicht gequetscht sind
+        self.setMinimumSize(550, 400)
+        self.resize(650, 450)
 
         self.loaded_file = None
         self.condition_id = None
