@@ -13,6 +13,17 @@ from PyQt6.QtCore import Qt
 from classes.ui.condition_linker_widget import ConditionLinkerWidget
 from classes.core.data_manager import DataManager
 
+# Waffenkategorien (analog zu character_creation/items.py)
+WEAPON_CATEGORIES = [
+    "Nahkampfwaffe",
+    "Schusswaffe",
+    "Explosivwaffe",
+    "Natural",
+    "Magie",
+    "Sonstiges",
+]
+
+
 class ItemEditorDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -49,6 +60,11 @@ class ItemEditorDialog(QDialog):
         self.damage_formula_input.setVisible(False)
         form_layout.addRow("Schadensformel:", self.damage_formula_input)
 
+        # Waffenkategorie (nur sichtbar, wenn Waffe)
+        self.weapon_category_combo = QComboBox()
+        self.weapon_category_combo.addItems(WEAPON_CATEGORIES)
+        self.weapon_category_combo.setVisible(False)
+        form_layout.addRow("Waffenkategorie:", self.weapon_category_combo)
 
         # Attribute-Bereich
         self.attr_group = QGroupBox("Attribute")
@@ -76,8 +92,10 @@ class ItemEditorDialog(QDialog):
         self.setLayout(main_layout)
 
     def toggle_weapon_fields(self):
-        """Zeigt oder versteckt die Eingabe für die Schadensformel."""
-        self.damage_formula_input.setVisible(self.is_weapon_checkbox.isChecked())
+        """Zeigt oder versteckt Schadensformel und Waffenkategorie."""
+        visible = self.is_weapon_checkbox.isChecked()
+        self.damage_formula_input.setVisible(visible)
+        self.weapon_category_combo.setVisible(visible)
 
 
     def add_attribute_row(self, preset_name=None, preset_value=None):
@@ -184,11 +202,17 @@ class ItemEditorDialog(QDialog):
         self.name_input.setText(item_data.get("name", ""))
         self.description_input.setText(item_data.get("description", ""))
 
-        # Waffen-Checkbox & Schadensformel laden
+        # Waffen-Checkbox, Schadensformel und Waffenkategorie laden
         is_weapon = item_data.get("is_weapon", False)
         self.is_weapon_checkbox.setChecked(is_weapon)
         self.damage_formula_input.setText(item_data.get("damage_formula", ""))
+        weapon_cat = item_data.get("weapon_category") or "Sonstiges"
+        if weapon_cat in WEAPON_CATEGORIES:
+            self.weapon_category_combo.setCurrentText(weapon_cat)
+        else:
+            self.weapon_category_combo.setCurrentText("Sonstiges")
         self.damage_formula_input.setVisible(is_weapon)
+        self.weapon_category_combo.setVisible(is_weapon)
 
         # Zustände / Links über ConditionLinkerWidget laden
         self.condition_linker.set_linked_conditions(item_data.get("linked_conditions", []))
@@ -223,7 +247,8 @@ class ItemEditorDialog(QDialog):
 
         # --- WICHTIG: richtige Widgets verwenden ---
         is_weapon = self.is_weapon_checkbox.isChecked()
-        damage_formula = self.damage_formula_input.text().strip() if self.is_weapon_checkbox.isChecked() else ""
+        damage_formula = self.damage_formula_input.text().strip() if is_weapon else ""
+        weapon_category = self.weapon_category_combo.currentText() if is_weapon else None
 
         item_obj = {
             "id": self.item_id,
@@ -232,6 +257,7 @@ class ItemEditorDialog(QDialog):
             "attributes": attributes,
             "is_weapon": is_weapon,
             "damage_formula": damage_formula,
+            "weapon_category": weapon_category,
             "linked_conditions": self.condition_linker.get_linked_conditions()
         }
 
