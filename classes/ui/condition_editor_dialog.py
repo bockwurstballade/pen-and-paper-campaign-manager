@@ -74,8 +74,6 @@ class ConditionEditorDialog(QDialog):
 
         targets.append("Benutzerdefiniert ...")
 
-        print("DEBUG targets im Dialog:", targets)
-
         self.effect_target_input.clear()
         self.effect_target_input.addItems(targets)
 

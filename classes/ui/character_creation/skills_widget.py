@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QFormLayout, QPushB
 from typing import Dict, Any
 
 from classes.ui.character_creation.skills import CharacterCreationDialogSkills
+from classes.ui.ui_utils import style_groupbox
 
 class SkillsWidget(QWidget):
     def __init__(self, parent=None):
@@ -36,7 +37,7 @@ class SkillsWidget(QWidget):
         # UI initialisieren
         for category in self.skills:
             self.group_boxes[category] = QGroupBox(category)
-            self._style_groupbox(self.group_boxes[category])
+            style_groupbox(self.group_boxes[category])
 
             self.form_layouts[category] = QFormLayout()
             self.skill_inputs[category] = {}
@@ -59,23 +60,6 @@ class SkillsWidget(QWidget):
 
         self.layout.addWidget(self.total_points_label)
 
-    def _style_groupbox(self, box: QGroupBox):
-        box.setStyleSheet("""
-            QGroupBox {
-                margin-top: 8px;
-                padding: 8px;
-                border: 1px solid #444;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0px 4px;
-                color: #ddd;
-                font-weight: bold;
-            }
-        """)
 
     def load_data(self, character: Dict[str, Any]):
         # Skills aufräumen

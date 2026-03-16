@@ -53,8 +53,7 @@ class CombatTurnWidget(QWidget):
             
             skipped, reason = manager.check_and_skip_if_incapacitated()
             if skipped:
-                if hasattr(self.main_dialog, "log_widget"):
-                    self.main_dialog.log_widget.log_message(reason)
+                self.main_dialog.log_message(reason)
                 new_round = manager.next_turn()
                 if new_round:
                     QMessageBox.information(self, "Neue Runde", f"Runde {manager.round_number} beginnt!")
@@ -77,8 +76,7 @@ class CombatTurnWidget(QWidget):
 
     def run_current_turn(self):
         # Delegate to main dialog's action handler
-        if hasattr(self.main_dialog, "action_handler"):
-            self.main_dialog.action_handler.run_current_turn()
+        self.main_dialog.action_handler.run_current_turn()
 
     def refresh_turn_display(self):
         manager = self.main_dialog.combat_manager

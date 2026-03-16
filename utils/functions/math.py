@@ -1,7 +1,4 @@
-import os
-import json
 from decimal import Decimal, ROUND_HALF_UP
-from typing import List, Dict, Any
 
 def kaufmaennisch_runden(x):
     """Rundet nach kaufmännischer Regel: ab 0.5 wird aufgerundet.

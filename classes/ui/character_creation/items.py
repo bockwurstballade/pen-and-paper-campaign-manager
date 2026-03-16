@@ -12,6 +12,7 @@ import json
 import uuid
 from classes.ui.attribute_dialog import AttributeDialog
 from classes.core.data_manager import DataManager
+from classes.ui.ui_utils import style_groupbox
 
 
 class CharacterCreationDialogItems:
@@ -44,7 +45,7 @@ class CharacterCreationDialogItems:
 
         # --- Grundlayout ---
         group = QGroupBox(item_name)
-        parent.style_groupbox(group)
+        style_groupbox(group)
         vbox = QVBoxLayout()
         attr_layout = QFormLayout()
         vbox.addLayout(attr_layout)
@@ -334,7 +335,7 @@ class CharacterCreationDialogItems:
         linked_conditions = chosen_item.get("linked_conditions", [])
 
         item_group = QGroupBox(item_name)
-        parent.style_groupbox(item_group)
+        style_groupbox(item_group)
         item_layout = QVBoxLayout()
 
         # Attribute anzeigen

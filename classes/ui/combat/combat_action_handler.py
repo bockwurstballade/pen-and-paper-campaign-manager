@@ -1,14 +1,12 @@
 from PyQt6.QtWidgets import QMessageBox, QInputDialog
+from classes.core.dice.roll.evaluate import DiceRollEvaluator
 
 class CombatActionHandler:
     def __init__(self, main_dialog):
         self.main_dialog = main_dialog
 
     def log_message(self, text: str):
-        if hasattr(self.main_dialog, "log_widget"):
-            self.main_dialog.log_widget.log_message(text)
-        elif hasattr(self.main_dialog, "log_box"):
-            self.main_dialog.log_box.append(f"• {text}") # Fallback
+        self.main_dialog.log_message(text)
 
     def run_current_turn(self):
         """Führt den Zug des aktuell an der Reihe befindlichen Kämpfers aus."""
@@ -20,11 +18,7 @@ class CombatActionHandler:
         skipped, reason = manager.check_and_skip_if_incapacitated()
         if skipped:
             self.log_message(reason)
-            # Advance to next natively via the UI button handler or directly:
-            if hasattr(self.main_dialog, "turn_widget"):
-                self.main_dialog.turn_widget.next_turn()
-            elif hasattr(self.main_dialog, "next_turn"):
-                self.main_dialog.next_turn()
+            self.main_dialog.turn_widget.next_turn()
             return
 
         self.execute_turn(actor)
@@ -178,10 +172,7 @@ class CombatActionHandler:
         for log_msg in logs:
             self.log_message(log_msg)
 
-        if hasattr(self.main_dialog, "actor_list_widget"):
-             self.main_dialog.actor_list_widget.refresh_actor_list()
-        elif hasattr(self.main_dialog, "refresh_actor_list"):
-             self.main_dialog.refresh_actor_list()
+        self.main_dialog.refresh_actor_list()
 
         self.log_message(
             f"{attacker_name} verursacht {total_damage} Schaden an {target_name} "
@@ -243,16 +234,23 @@ class CombatActionHandler:
 
         try:
             roll = int(roll_str)
-            if roll == 0:
-                roll = 100
-            if not 1 <= roll <= 100:
+            if not (0 <= roll <= 100):
                 raise ValueError()
         except ValueError:
-            QMessageBox.warning(self.main_dialog, "Fehler", "Ungültiger Wurfwert. Bitte 1–100 eingeben (0 = 100).")
+            QMessageBox.warning(self.main_dialog, "Fehler", "Ungültiger Wurfwert. Bitte 0–100 eingeben (0 = 100).")
             return False, False
 
-        crit = roll in (1, 100)
-        success = roll <= base_val
+        # Korrekte Auswertung über den DiceRollEvaluator (inkl. prozentualer Krit-Bereiche)
+        result = DiceRollEvaluator.evaluate_roll({
+            "base_chance": base_val,
+            "bonus": 0,
+            "rolled": roll
+        })
+        success = result["success"]
+        crit = result["crit"]
+
+        # Roll-Wert für Anzeige normalisieren (0 → 100)
+        display_roll = 100 if roll == 0 else roll
 
         if skill_val > 0:
             details = f"Wurf auf {skill_name} ({category})"
@@ -261,7 +259,7 @@ class CombatActionHandler:
 
         self.log_message(
             f"{actor['display_name']} {details}: "
-            f"Wurf={roll}, Zielwert={base_val} → {'✔️ Erfolg' if success else '❌ Fehlschlag'}"
+            f"Wurf={display_roll}, Zielwert={base_val} → {'✔️ Erfolg' if success else '❌ Fehlschlag'}"
             + (" (Kritisch!)" if crit else "")
         )
 

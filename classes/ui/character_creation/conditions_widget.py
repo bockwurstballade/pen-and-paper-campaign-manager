@@ -3,6 +3,7 @@ from typing import Dict, Any
 
 from classes.ui.character_creation.conditions import CharacterCreationDialogConditions
 from classes.core.data_manager import DataManager
+from classes.ui.ui_utils import style_groupbox
 
 class ConditionsWidget(QWidget):
     def __init__(self, parent=None):
@@ -20,7 +21,7 @@ class ConditionsWidget(QWidget):
         
         # UI initialisieren
         self.conditions_group = QGroupBox("Zustände")
-        self.style_groupbox(self.conditions_group)
+        style_groupbox(self.conditions_group)
         self.conditions_layout = QVBoxLayout()
         
         self.condition_add_button = QPushButton("+ Neuer Zustand")
@@ -38,23 +39,6 @@ class ConditionsWidget(QWidget):
         self.main_dialog = parent
 
 
-    def style_groupbox(self, box: QGroupBox):
-        box.setStyleSheet("""
-            QGroupBox {
-                margin-top: 8px;
-                padding: 8px;
-                border: 1px solid #444;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0px 4px;
-                color: #ddd;
-                font-weight: bold;
-            }
-        """)
 
     def get_data(self) -> Dict[str, Any]:
         """Gibt die gespeicherten Zustandsdaten für den Save zurück."""
@@ -145,38 +129,8 @@ class ConditionsWidget(QWidget):
 
 
     def render_condition_block_from_condition_data(self, cid, cond_data, source_item=None):
-        cond_name = cond_data.get("name", f"Zustand {cid[:8]}")
-        desc = cond_data.get("description", "")
-        effect_type = cond_data.get("effect_type", "keine Auswirkung")
-        effect_target = cond_data.get("effect_target", "")
-        effect_value = cond_data.get("effect_value", 0)
-
-        group = QGroupBox(cond_name)
-        self.style_groupbox(group)
-        layout = QVBoxLayout()
-
-        desc_label = QLabel(desc)
-        desc_label.setWordWrap(True)
-        layout.addWidget(desc_label)
-
-        if effect_type != "keine Auswirkung" and effect_target:
-            effect_label = QLabel(f"{effect_type.capitalize()}e Wirkung: {effect_target} {effect_value:+}")
-            effect_label.setStyleSheet("color: #555; font-style: italic;")
-            layout.addWidget(effect_label)
-
-        if source_item:
-            src_label = QLabel(f"Aktiv durch Item: {source_item}")
-            src_label.setStyleSheet("color: #888; font-size: 10px;")
-            layout.addWidget(src_label)
-
-        if source_item is None:
-            remove_button = QPushButton("– Zustand entfernen")
-            remove_button.clicked.connect(lambda _, cond_id=cid: self.manual_remove_condition_by_id(cond_id))
-            layout.addWidget(remove_button)
-
-        group.setLayout(layout)
-        insert_pos = max(0, self.conditions_layout.count() - 2)
-        self.conditions_layout.insertWidget(insert_pos, group)
+        """Delegiert an den conditions_handler, der die gleiche Logik implementiert."""
+        group = self.conditions_handler.render_condition_block(cid, cond_data, source_item)
 
         temp = self.active_condition_by_id.get(cid, {})
         temp["_widget"] = group

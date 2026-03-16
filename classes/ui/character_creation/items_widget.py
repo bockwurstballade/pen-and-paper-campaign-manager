@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QGroupBox, QPushButton, QCheck
 from typing import Dict, Any
 
 from classes.ui.character_creation.items import CharacterCreationDialogItems
+from classes.ui.ui_utils import style_groupbox
 
 class ItemsWidget(QWidget):
     def __init__(self, parent=None):
@@ -17,7 +18,7 @@ class ItemsWidget(QWidget):
 
         # UI initialisieren
         self.items_group = QGroupBox("Items")
-        self.style_groupbox(self.items_group)
+        style_groupbox(self.items_group)
         self.items_layout = QVBoxLayout()
         
         self.item_add_button = QPushButton("+ Neues Item")
@@ -41,23 +42,6 @@ class ItemsWidget(QWidget):
         # was wir auf den echten Dialog durchleiten müssen.
         self.main_dialog = parent
 
-    def style_groupbox(self, box: QGroupBox):
-        box.setStyleSheet("""
-            QGroupBox {
-                margin-top: 8px;
-                padding: 8px;
-                border: 1px solid #444;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0px 4px;
-                color: #ddd;
-                font-weight: bold;
-            }
-        """)
 
     def attach_item_conditions(self, item_name, condition_ids):
         """Leitet den Request vom Item-Handler an den Hauptdialog (oder später ConditionsWidget) weiter."""

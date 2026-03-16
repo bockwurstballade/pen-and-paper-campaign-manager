@@ -1,10 +1,6 @@
-# benötigte Imports
-
-## Qt Frontend Technologie
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
-    QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QCheckBox, QGroupBox
 )
 from PyQt6.QtCore import Qt
 

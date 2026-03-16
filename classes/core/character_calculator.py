@@ -75,7 +75,7 @@ class CharacterCalculator:
             for skill, val in skillmap.items():
                 try:
                     val_int = int(val)
-                except:
+                except (ValueError, TypeError):
                     val_int = 0
                 base_skill_values[skill] = val_int
                 total += val_int
@@ -97,7 +97,7 @@ class CharacterCalculator:
             val = cond.get("effect_value", 0)
             try:
                 val = int(val)
-            except:
+            except (ValueError, TypeError):
                 val = 0
 
             # Fertigkeit: XYZ

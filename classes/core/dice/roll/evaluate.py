@@ -2,12 +2,6 @@ from typing import Dict, TypedDict
 
 import logging
 
-# Konfiguration des Loggers (einmalig im Modul oder in der Anwendung)
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='[%(asctime)s] %(levelname)-8s %(name)s: %(message)s',
-    datefmt='%H:%M:%S'
-)
 logger = logging.getLogger('DiceRollEvaluator')
 
 ## eigene Funktionen
@@ -29,7 +23,8 @@ class DiceRollEvaluator:
             success: bool # war die würfelprobe an sich erfolgreich oder ein Fehlschlag
             crit: bool # war es ein kritischer Erfolg / Fehlschlag?
 
-    def evaluate_roll(self, input_dict: Dict[str, int]) -> "DiceRollEvaluator.ChanceResult":
+    @staticmethod
+    def evaluate_roll(input_dict: Dict[str, int]) -> "DiceRollEvaluator.ChanceResult":
         """
         Berechnet Erfolg und kritischen Treffer basierend auf base_chance und rolled.
 

@@ -2,27 +2,14 @@ from PyQt6.QtWidgets import QGroupBox, QFormLayout, QCheckBox, QLineEdit
 from typing import Dict, Any, Optional
 from PyQt6.QtCore import Qt
 
+from classes.ui.ui_utils import style_groupbox
+
 class ArmorWidget(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Rüstung", parent)
         
         # Das CSS Styling lag früher im Dialog, wir setzen es hier
-        self.setStyleSheet("""
-            QGroupBox {
-                margin-top: 8px;
-                padding: 8px;
-                border: 1px solid #444;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0px 4px;
-                color: #ddd;
-                font-weight: bold;
-            }
-        """)
+        style_groupbox(self)
         
         armor_layout = QFormLayout(self)
 

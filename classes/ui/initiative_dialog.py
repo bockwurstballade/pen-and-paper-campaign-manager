@@ -1,13 +1,7 @@
-# benötigte Imports
-import os
-import json
-## Qt Frontend Technologie
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
-    QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget,
+    QLineEdit, QFormLayout, QMessageBox, QPushButton, QTextEdit
 )
-from PyQt6.QtCore import Qt
 
 ## eigene Funktionen
 from utils.functions.math import kaufmaennisch_runden

@@ -121,7 +121,4 @@ class CombatSetupWidget(QWidget):
             self.main_dialog.combat_manager.add_combatant(actor)
 
         # UI neu aufbauen auf dem main_dialog (oder via list widget)
-        if hasattr(self.main_dialog, "actor_list_widget"):
-             self.main_dialog.actor_list_widget.refresh_actor_list()
-        elif hasattr(self.main_dialog, "refresh_actor_list"):
-             self.main_dialog.refresh_actor_list()
+        self.main_dialog.refresh_actor_list()

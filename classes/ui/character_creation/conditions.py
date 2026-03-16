@@ -11,6 +11,7 @@ import json
 import uuid
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
 from classes.core.data_manager import DataManager
+from classes.ui.ui_utils import style_groupbox
 
 
 class CharacterCreationDialogConditions:
@@ -116,7 +117,7 @@ class CharacterCreationDialogConditions:
         effect_value = cond_data.get("effect_value", 0)
 
         group = QGroupBox(cond_name)
-        parent.style_groupbox(group)
+        style_groupbox(group)
         layout = QVBoxLayout()
 
         desc_label = QLabel(desc)

@@ -1,12 +1,7 @@
-# benötigte Imports
-
-## Qt Frontend Technologie
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
-    QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
+    QDialog, QLabel, QPushButton, QVBoxLayout,
+    QLineEdit, QComboBox, QFormLayout, QMessageBox
 )
-from PyQt6.QtCore import Qt
 
 
 ## eigene klassen
@@ -200,31 +195,22 @@ class DiceRollDialog(QDialog):
                 QMessageBox.warning(self, "Fehler", "Bitte das tatsächliche Würfelergebnis (1-100) als ganze Zahl eingeben.")
                 return
 
-            # Spezialfall: 0 ("0 + 00" auf den Würfeln) ist das gleiche wie 100 (kritischer Fehlschlag)
-            if roll_val == 0:
-                roll_val = 100
-
-            if not (1 <= roll_val <= 100):
-                QMessageBox.warning(self, "Fehler", "Würfelwert muss zwischen 1 und 100 liegen (0 zählt als 100).")
+            if not (0 <= roll_val <= 100):
+                QMessageBox.warning(self, "Fehler", "Würfelwert muss zwischen 0 und 100 liegen (0 zählt als 100).")
                 return
             
-            # --- HIER IST DIE KORREKTUR ---
-
-            # 1. Erstelle eine Instanz des Evaluators
-            evaluator = DiceRollEvaluator()
-
-            # 2. Rufe die Methode auf der *Instanz* auf und übergib die Rohdaten
-            result = evaluator.evaluate_roll({
-                "base_chance": base_chance,  # Übergib die Basis-Chance
-                "bonus": bonus_val,          # Übergib den Bonus separat
+            # Für die Anzeige normalisieren (0 → 100)
+            display_roll = 100 if roll_val == 0 else roll_val
+            
+            # --- Auswertung über DiceRollEvaluator (statische Methode) ---
+            result = DiceRollEvaluator.evaluate_roll({
+                "base_chance": base_chance,
+                "bonus": bonus_val,
                 "rolled": roll_val
             })
 
-            # 3. Greife auf das Ergebnis als Dictionary (TypedDict) zu
             success = result['success']
             crit = result['crit']
-
-            # --- ENDE DER KORREKTUR ---
 
             # Ergebnis-Text bauen
             if success:
@@ -236,12 +222,11 @@ class DiceRollDialog(QDialog):
                 outcome_text = "KRITISCHER ERFOLG 🏅 (" + outcome_text + ")"
             elif not success and crit:
                 outcome_text = "KRITISCHER FEHLSCHLAG 💥 (" + outcome_text + ")"
-
-            # Noch ein paar Debug-Infos, damit der SL alles sieht
+            # Infos für den Spielleiter
             details = (
                 f"Grundchance: {base_chance}  |  Modifikator: {bonus_val:+}  "
-                f"→ Zielwert: {final_chance}\n"  # final_chance von oben verwenden
-                f"Wurf: {roll_val}\n"
+                f"→ Zielwert: {final_chance}\n"
+                f"Wurf: {display_roll}\n"
             )
 
             self.result_label.setText(outcome_text + "\n\n" + details)

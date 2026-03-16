@@ -1,13 +1,6 @@
-import os
-import json
-import uuid
-
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget,
-    QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
-    QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox
 )
-from PyQt6.QtCore import Qt
 
 from classes.ui.surprise_dialog import SurpriseDialog
 from classes.ui.initiative_dialog import InitiativeDialog
@@ -71,6 +64,10 @@ class CombatDialog(QDialog):
     def load_character_data(self, char_id):
         """Hilfsfunktion: Lädt Charakterdaten über den DataManager anhand der ID."""
         return DataManager.get_character_by_id(char_id)
+
+    def log_message(self, text: str):
+        """Delegiert an das Log-Widget."""
+        self.log_widget.log_message(text)
 
     def refresh_actor_list(self):
         """Passthrough zu ActorListWidget, wird oft von Setup aufgerufen."""

@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-from classes.ui.condition_editor_dialog import ConditionEditorDialog
+from classes.ui.condition_linker_widget import ConditionLinkerWidget
 from classes.core.data_manager import DataManager
 
 class ItemEditorDialog(QDialog):
@@ -63,35 +63,9 @@ class ItemEditorDialog(QDialog):
         self.attr_group.setLayout(self.attr_layout_outer)
         main_layout.addWidget(self.attr_group)
 
-        # Zustände, die diesem Item zugeordnet sind (Liste von Condition-UUIDs)
-        self.linked_conditions = []
-
-        # Zustände-Bereich
-        self.conditions_group = QGroupBox("Verknüpfte Zustände")
-        self.conditions_layout = QVBoxLayout()
-
-        self.conditions_list_label = QLabel("Keine Zustände verknüpft.")
-        self.conditions_layout.addWidget(self.conditions_list_label)
-
-        # Buttons: bestehenden Zustand verknüpfen / neuen Zustand erstellen
-        cond_button_row = QHBoxLayout()
-        self.add_existing_condition_button = QPushButton("+ Bestehenden Zustand verknüpfen")
-        self.add_existing_condition_button.clicked.connect(self.add_existing_condition)
-
-        self.create_new_condition_button = QPushButton("+ Neuen Zustand erstellen")
-        self.create_new_condition_button.clicked.connect(self.create_new_condition_from_item)
-
-        cond_button_row.addWidget(self.add_existing_condition_button)
-        cond_button_row.addWidget(self.create_new_condition_button)
-        self.conditions_layout.addLayout(cond_button_row)
-
-        # Entfernen-Button
-        self.remove_condition_button = QPushButton("– Zustand entfernen")
-        self.remove_condition_button.clicked.connect(self.remove_linked_condition)
-        self.conditions_layout.addWidget(self.remove_condition_button)
-
-        self.conditions_group.setLayout(self.conditions_layout)
-        main_layout.addWidget(self.conditions_group)
+        # Zustands-Verknüpfung via ConditionLinkerWidget
+        self.condition_linker = ConditionLinkerWidget(self)
+        main_layout.addWidget(self.condition_linker)
 
         # Speichern-Button
         save_button = QPushButton("Item speichern")
@@ -197,110 +171,6 @@ class ItemEditorDialog(QDialog):
 
         del self.attributes_inputs[attr_name]
 
-    ## ZUSTÄNDE IM ITEM DISPLAY
-
-    def update_condition_display(self):
-        """Aktualisiert die Anzeige der verknüpften Zustände im Item-Dialog."""
-        if not self.linked_conditions:
-            self.conditions_list_label.setText("Keine Zustände verknüpft.")
-            return
-
-        cond_map = {}
-        conditions = DataManager.get_all_conditions()
-        cond_map = {c["id"]: c for c in conditions}
-
-        lines = []
-        for cid in self.linked_conditions:
-            cond = cond_map.get(cid)
-            if cond:
-                lines.append(f"{cond.get('name', '(unbenannt)')} ({cid[:8]}...)")
-            else:
-                lines.append(f"[Fehlend] {cid[:8]}...")
-
-        self.conditions_list_label.setText("\n".join(lines))
-
-    def add_existing_condition(self):
-        """Lässt den Nutzer einen bestehenden Zustand auswählen und verknüpft ihn."""
-        conditions = DataManager.get_all_conditions()
-        
-        if not conditions:
-            QMessageBox.information(self, "Hinweis", "Es sind keine Zustände vorhanden.")
-            return
-
-        cond_names = [f"{c.get('name', '(unbenannt)')} [{c.get('id', '?')}]" for c in conditions]
-        choice, ok = QInputDialog.getItem(
-            self,
-            "Zustand auswählen",
-            "Welchen Zustand möchtest du verknüpfen?",
-            cond_names,
-            0,
-            False
-        )
-        if not ok:
-            return
-
-        idx = cond_names.index(choice)
-        selected = conditions[idx]
-        cid = selected.get("id")
-
-        if cid in self.linked_conditions:
-            QMessageBox.information(self, "Hinweis", "Dieser Zustand ist bereits verknüpft.")
-            return
-
-        self.linked_conditions.append(cid)
-        self.update_condition_display()
-
-    def create_new_condition_from_item(self):
-        """Erstellt einen neuen Zustand und verknüpft ihn direkt mit diesem Item."""
-        dlg = ConditionEditorDialog(self)
-        dlg.condition_id = str(uuid.uuid4())
-        dlg.exec()
-
-        # Versuchen, den zuletzt gespeicherten Zustand zu verknüpfen
-        try:
-            conditions = DataManager.get_all_conditions()
-            if conditions:
-                latest = conditions[-1]  # heuristik: letzter Eintrag = zuletzt gespeichert
-                cid = latest.get("id")
-                if cid and cid not in self.linked_conditions:
-                    self.linked_conditions.append(cid)
-        except Exception as e:
-            QMessageBox.warning(self, "Fehler", f"Konnte neuen Zustand nicht verknüpfen:\n{e}")
-
-        self.update_condition_display()
-
-    def remove_linked_condition(self):
-        """Ermöglicht, eine bestehende Verknüpfung zu entfernen."""
-        if not self.linked_conditions:
-            QMessageBox.information(self, "Hinweis", "Dieses Item hat keine verknüpften Zustände.")
-            return
-
-        # Namen zu IDs auflösen, damit der User nicht nur UUIDs sieht
-        cond_map = {}
-        conditions = DataManager.get_all_conditions()
-        cond_map = {c["id"]: c for c in conditions}
-
-        cond_choices = [
-            cond_map[cid]["name"] if cid in cond_map else f"[Fehlend] {cid[:8]}..."
-            for cid in self.linked_conditions
-        ]
-
-        choice, ok = QInputDialog.getItem(
-            self,
-            "Zustand entfernen",
-            "Welchen Zustand möchtest du entfernen?",
-            cond_choices,
-            0,
-            False
-        )
-        if not ok:
-            return
-
-        idx = cond_choices.index(choice)
-        cid_to_remove = self.linked_conditions[idx]
-        self.linked_conditions.remove(cid_to_remove)
-        self.update_condition_display()
-
     ## LADEN UND SPEICHERN VON ITEMDATEN
 
     def load_item_data(self, item_data, file_path=None):
@@ -320,10 +190,8 @@ class ItemEditorDialog(QDialog):
         self.damage_formula_input.setText(item_data.get("damage_formula", ""))
         self.damage_formula_input.setVisible(is_weapon)
 
-
-        # Zustände / Links laden
-        self.linked_conditions = item_data.get("linked_conditions", [])
-        self.update_condition_display()
+        # Zustände / Links über ConditionLinkerWidget laden
+        self.condition_linker.set_linked_conditions(item_data.get("linked_conditions", []))
 
         # Attribute rendern
         attrs = item_data.get("attributes", {})
@@ -334,9 +202,7 @@ class ItemEditorDialog(QDialog):
 
     def save_item(self):
         """
-        Speichert/aktualisiert das Item in der items.json.
-        - Wenn self.loaded_file gesetzt -> in diese Datei schreiben.
-        - Sonst: neue Datei anlegen bzw. bestehende items.json im Arbeitsordner erweitern.
+        Speichert/aktualisiert das Item.
         """
         name = self.name_input.text().strip()
         if not name:
@@ -366,7 +232,7 @@ class ItemEditorDialog(QDialog):
             "attributes": attributes,
             "is_weapon": is_weapon,
             "damage_formula": damage_formula,
-            "linked_conditions": self.linked_conditions
+            "linked_conditions": self.condition_linker.get_linked_conditions()
         }
 
         try:
@@ -375,4 +241,3 @@ class ItemEditorDialog(QDialog):
             self.accept()
         except Exception as e:
             QMessageBox.warning(self, "Fehler", f"Fehler beim Speichern des Items:\n{e}")
-
