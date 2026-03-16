@@ -68,6 +68,9 @@ class BaseStatsWidget(QWidget):
         self.base_form.addRow("Grundschaden:", self.base_damage_input)
         self.base_form.addRow("Beschreibung:", self.description_input)
 
+        # Kampagnen sofort laden (bei neuem Charakter wird load_data() nicht aufgerufen)
+        self.load_campaigns()
+
     def update_base_hitpoints(self):
         try:
             self.base_hitpoints = int(self.hitpoints_input.text())

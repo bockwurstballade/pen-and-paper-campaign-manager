@@ -18,6 +18,7 @@ from classes.ui.character_creation_dialog import CharacterCreationDialog
 from classes.ui.item_editor_dialog import ItemEditorDialog
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
 from classes.ui.campaign_creation_dialog import CampaignCreationDialog
+from classes.ui.player_editor_dialog import PlayerEditorDialog
 from classes.core.data_manager import DataManager
 
 class WelcomeWindow(QMainWindow):
@@ -29,6 +30,8 @@ class WelcomeWindow(QMainWindow):
     BUTTON_CONFIG = [
         ("Neuen Charakter erstellen", "start_character_creation"),
         ("Bestehenden Charakter laden", "load_character"),
+        ("Neuen Spieler erstellen", "create_new_player"),
+        ("Bestehenden Spieler laden", "load_player"),
         ("Neues Item erstellen", "create_new_item"),
         ("Bestehendes Item laden", "load_item"),
         ("Neuen Zustand erstellen", "create_new_condition"),
@@ -145,6 +148,42 @@ class WelcomeWindow(QMainWindow):
     def start_campaign_creation(self):
         dialog = CampaignCreationDialog(self)
         dialog.exec()
+
+    def create_new_player(self):
+        """Öffnet den Spieler-Editor leer für einen neuen Spieler."""
+        dlg = PlayerEditorDialog(self)
+        dlg.player_id = str(uuid.uuid4())
+        dlg.exec()
+
+    def load_player(self):
+        """Lädt alle Spieler aus dem data/players/ Ordner, lässt den Nutzer einen wählen und öffnet ihn im Editor."""
+        players_list = DataManager.get_all_players()
+        if not players_list:
+            QMessageBox.information(
+                self,
+                "Hinweis",
+                "Es wurden noch keine Spieler gespeichert oder sie konnten nicht geladen werden.",
+            )
+            return
+
+        player_names = [p["display"] for p in players_list]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Spieler auswählen",
+            "Welchen Spieler möchtest du bearbeiten?",
+            player_names,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        chosen_index = player_names.index(choice)
+        chosen_player = players_list[chosen_index]
+
+        dlg = PlayerEditorDialog(self)
+        dlg.load_player_data(chosen_player["data"], chosen_player["path"])
+        dlg.exec()
 
     def load_character(self):
         candidates = DataManager.get_all_characters()

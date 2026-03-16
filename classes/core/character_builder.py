@@ -29,7 +29,9 @@ class CharacterBuilder:
         armor_condition: Optional[int],
         skills_raw: Dict[str, Dict[str, int]],
         items_raw: Dict[str, dict],
-        conditions_raw: Dict[str, dict]
+        conditions_raw: Dict[str, dict],
+        player_id: Optional[str] = None,
+        player: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         
         # Basis-Validierungen (falls das UI das übersehen hat)
@@ -94,5 +96,7 @@ class CharacterBuilder:
             "role": role,
             "armor_enabled": armor_enabled,
             "armor_value": armor_value,
-            "armor_condition": armor_condition
+            "armor_condition": armor_condition,
+            "player_id": player_id,
+            "player": player,
         }

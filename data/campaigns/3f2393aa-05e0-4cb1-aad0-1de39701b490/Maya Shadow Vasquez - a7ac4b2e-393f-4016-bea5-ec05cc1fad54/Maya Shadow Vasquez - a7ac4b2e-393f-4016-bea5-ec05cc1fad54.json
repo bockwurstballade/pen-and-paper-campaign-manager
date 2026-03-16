@@ -1,0 +1,124 @@
+{
+    "id": "a7ac4b2e-393f-4016-bea5-ec05cc1fad54",
+    "campaign_id": "3f2393aa-05e0-4cb1-aad0-1de39701b490",
+    "name": "Maya \"Shadow\" Vasquez",
+    "class": "Soldatin",
+    "gender": "Weiblich",
+    "age": 42,
+    "hitpoints": 100,
+    "base_damage": "2W10",
+    "build": "athletisch",
+    "religion": "konfessionslos",
+    "occupation": "Ex Elite-Soldating",
+    "marital_status": "Ledig",
+    "skills": {
+        "Handeln": {
+            "Akrobatik": 60,
+            "Schießen": 70,
+            "Überleben": 60
+        },
+        "Wissen": {
+            "Programmieren": 50,
+            "Logik": 60,
+            "Politik": 50
+        },
+        "Soziales": {
+            "Feilschen": 50
+        }
+    },
+    "category_scores": {
+        "Handeln": 19,
+        "Wissen": 16,
+        "Soziales": 5
+    },
+    "inspiration_points": {
+        "Handeln": 2,
+        "Wissen": 2,
+        "Soziales": 1
+    },
+    "items": {
+        "Funkgerät - Neuanfang - Sicherheitsstufe 2": {
+            "attributes": {
+                "Funkkreis": "Neuanfang"
+            },
+            "id": null,
+            "linked_conditions": [],
+            "is_weapon": false,
+            "damage_formula": "",
+            "weapon_category": null,
+            "weapon_state": {
+                "chambers": 0,
+                "chambers_capacity": 0,
+                "magazine": {
+                    "inserted": false,
+                    "count": 0,
+                    "capacity": 0
+                },
+                "projectiles_loaded": 0,
+                "projectile_type": ""
+            }
+        },
+        "G36": {
+            "attributes": {},
+            "id": null,
+            "linked_conditions": [],
+            "is_weapon": true,
+            "damage_formula": "7W10",
+            "weapon_category": "Schusswaffe",
+            "weapon_state": {
+                "chambers": 0,
+                "chambers_capacity": 1,
+                "magazine": {
+                    "inserted": true,
+                    "count": 25,
+                    "capacity": 30
+                },
+                "projectiles_loaded": 0,
+                "projectile_type": ""
+            }
+        },
+        "Pistole P8": {
+            "attributes": {},
+            "id": null,
+            "linked_conditions": [],
+            "is_weapon": true,
+            "damage_formula": "7W10",
+            "weapon_category": "Schusswaffe",
+            "weapon_state": {
+                "chambers": 1,
+                "chambers_capacity": 1,
+                "magazine": {
+                    "inserted": true,
+                    "count": 14,
+                    "capacity": 15
+                },
+                "projectiles_loaded": 0,
+                "projectile_type": ""
+            }
+        }
+    },
+    "conditions": {
+        "Gute Laune": {
+            "id": "0a2ba02a-f13d-4ef4-bd1d-53e7ce28b76e",
+            "name": "Gute Laune",
+            "description": "Der Charakter ist gut gelaunt",
+            "effect_type": "keine Auswirkung",
+            "effect_target": "",
+            "effect_value": 0
+        }
+    },
+    "description": "Maya \"Shadow\" Vasquez ist eine Militärsoldatin mit Einblicken in die Rettungsaktionen rund um den Krankheitsausbruch.\n\n\nNach ihrer militärischen Grundausbildung absolvierte sie eine spezialisierte Eliteschulung mit Schwerpunkt auf das Eindringen in feindliche Computersysteme.\n\n\nIn ihrer zivilen Vergangenheit engagierte sie sich als \"Ethical Hacker\". Hierbei nutzte sie ihre Fähigkeiten in der Cyber-Sicherheit für das Gemeinwohl.\n\n\nZur Zeit des Ausbruchs wurde sie damit beauftragt, in Computersysteme einzudringen, um an sensible Informationen rund um den Krankheitsausbruch zu gelangen. Nach getaner Arbeit wollte sie zu Ihrem Stützpunkt zurückkehren, wurde allerdings vom Krankheitsausbruch überrascht und musste in der Stadt \"Neuanfang\" verweilen.\n\n\nBereits vor Beginn des Abenteuers hatte Maya Shadow bereits Bekanntschaft mit Herrn Dr. Reiner Hengst gemacht, da der Doktor in der Vergangenheit schon einmal Maya's Vater behandelt hat.",
+    "role": "npc",
+    "armor_enabled": true,
+    "armor_value": 4,
+    "armor_condition": 9,
+    "player_id": "5e2675a4-6819-420a-af4e-d84cfd8174fb",
+    "player": {
+        "id": "5e2675a4-6819-420a-af4e-d84cfd8174fb",
+        "name": "Steven",
+        "nickname": "Steven",
+        "discord": "",
+        "roll20": ""
+    },
+    "image_filename": "Maya Shadow Vasquez - a7ac4b2e-393f-4016-bea5-ec05cc1fad54.jpg"
+}

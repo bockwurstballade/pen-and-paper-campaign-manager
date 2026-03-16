@@ -34,3 +34,11 @@ venv/
 
 # Windows Zone.Identifier Streams
 *Zone.Identifier
+
+
+# Media Files
+*.jpg
+*.jpeg
+*.png
+*.tiff
+*.webp

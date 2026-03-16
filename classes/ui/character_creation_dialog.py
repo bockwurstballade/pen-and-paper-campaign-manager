@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea, QSpinBox
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap
 
 ## eigene Funktionen
 from utils.functions.math import kaufmaennisch_runden
@@ -30,6 +31,8 @@ class CharacterCreationDialog(QDialog):
     def __init__(self, parent=None):
         self.loaded_file = None
         self.char_id = None          # UUID des Charakters
+        self._selected_image_source_path = None  # lokaler Pfad, den der User gewählt hat
+        self._current_image_filename = None  # Dateiname im Charakter-Ordner (aus geladenem Charakter)
 
         super().__init__(parent)
         self.setWindowTitle("Neuen Charakter erstellen")
@@ -56,7 +59,32 @@ class CharacterCreationDialog(QDialog):
         # Ab hier benutzen wir main_layout so wie vorher
         main_layout = content_layout
         # ---------- /SCROLL WRAPPER ----------
+        # Spieler-Zuweisung
+        self.player_combo = QComboBox()
+        self._player_id_by_index = {}
+        self._reload_players_into_combo()
+        player_group = QGroupBox("Spieler")
+        player_layout = QFormLayout()
+        player_layout.addRow("Zugewiesener Spieler:", self.player_combo)
+        player_group.setLayout(player_layout)
+        main_layout.addWidget(player_group)
 
+        # Charakterbild
+        image_group = QGroupBox("Charakterbild")
+        image_layout = QVBoxLayout()
+        self.portrait_label = QLabel("Kein Bild ausgewählt.")
+        self.portrait_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.portrait_label.setMinimumHeight(160)
+        self.portrait_label.setStyleSheet("border: 1px solid gray;")
+        self.portrait_label.setWordWrap(True)
+
+        self.select_image_button = QPushButton("Bild auswählen …")
+        self.select_image_button.clicked.connect(self.choose_character_image)
+
+        image_layout.addWidget(self.portrait_label)
+        image_layout.addWidget(self.select_image_button)
+        image_group.setLayout(image_layout)
+        main_layout.addWidget(image_group)
 
         # Base Stats Modul
         self.base_stats = BaseStatsWidget()
@@ -87,6 +115,66 @@ class CharacterCreationDialog(QDialog):
 
         main_layout.addStretch()
 
+
+    def _show_placeholder_image(self, text: str = "Kein Bild verfügbar."):
+        """Zeigt einen einfachen Platzhaltertext im Bildbereich."""
+        self.portrait_label.setPixmap(QPixmap())
+        self.portrait_label.setText(text)
+
+    def _show_image_from_path(self, path: str):
+        """Lädt ein Bild von einem Pfad und zeigt es skaliert in der Vorschau an."""
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            self._show_placeholder_image("Bild konnte nicht geladen werden.")
+            return
+        scaled = pixmap.scaled(
+            self.portrait_label.width() if self.portrait_label.width() > 0 else 200,
+            self.portrait_label.height() if self.portrait_label.height() > 0 else 200,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.portrait_label.setText("")
+        self.portrait_label.setPixmap(scaled)
+
+    def choose_character_image(self):
+        """Öffnet einen File-Chooser, um ein Charakterbild auszuwählen."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Charakterbild auswählen",
+            "",
+            "Bilder (*.png *.jpg *.jpeg *.webp)",
+        )
+        if not file_path:
+            return
+
+        self._selected_image_source_path = file_path
+        # Wenn ein neues Bild gewählt wird, überschreiben wir bewusst die alte Referenz
+        self._current_image_filename = None
+        self._show_image_from_path(file_path)
+
+    def _reload_players_into_combo(self, selected_player_id: str = None):
+        """
+        Lädt die Liste aller Spieler und befüllt die ComboBox.
+        """
+        self.player_combo.clear()
+        self._player_id_by_index.clear()
+
+        # Default-Eintrag: kein Spieler
+        self.player_combo.addItem("— Kein Spieler zugewiesen —", userData=None)
+        self._player_id_by_index[0] = None
+
+        players = DataManager.get_all_players()
+        selected_index = 0
+        for idx_offset, player_info in enumerate(players, start=1):
+            pdata = player_info["data"]
+            pid = pdata.get("id")
+            display = player_info.get("display") or pdata.get("name", "(unbenannt)")
+            self.player_combo.addItem(display, userData=pid)
+            self._player_id_by_index[idx_offset] = pid
+            if selected_player_id and pid == selected_player_id:
+                selected_index = idx_offset
+
+        self.player_combo.setCurrentIndex(selected_index)
 
     def attach_item_conditions(self, item_name, condition_ids):
         """
@@ -255,8 +343,14 @@ class CharacterCreationDialog(QDialog):
                 **armor_data,
                 "skills_raw": skills_raw,
                 "items_raw": items_data,
-                "conditions_raw": conditions_data
+                "conditions_raw": conditions_data,
             }
+            selected_player_id = self.player_combo.currentData()
+            selected_player_obj = None
+            if selected_player_id:
+                selected_player_obj = DataManager.get_player_by_id(selected_player_id)
+            builder_args["player_id"] = selected_player_id
+            builder_args["player"] = selected_player_obj
             character = CharacterBuilder.build_character(**builder_args)
             # Update our UI state with the stable ID the builder ensured
             self.char_id = character["id"]
@@ -270,7 +364,16 @@ class CharacterCreationDialog(QDialog):
             self.items_handler.upsert_items_to_global_library()
 
         try:
-            target_path = DataManager.save_character(character, target_path)
+            # Falls kein neues Bild ausgewählt wurde, aber ein Bild bereits existiert,
+            # muss die Referenz in der JSON erhalten bleiben.
+            if not self._selected_image_source_path and self._current_image_filename:
+                character["image_filename"] = self._current_image_filename
+
+            target_path = DataManager.save_character(
+                character,
+                file_path=target_path,
+                image_source_path=self._selected_image_source_path,
+            )
             # Das merken wir uns für zukünftige Saves in dieser Session
             self.loaded_file = target_path
             
@@ -291,6 +394,27 @@ class CharacterCreationDialog(QDialog):
         # Datei & ID merken
         self.loaded_file = file_path
         self.char_id = character.get("id", str(uuid.uuid4()))
+        # Zugewiesenen Spieler wiederherstellen
+        char_player_id = character.get("player_id")
+        self._reload_players_into_combo(selected_player_id=char_player_id)
+
+        # Charakterbild laden (falls vorhanden)
+        image_filename = character.get("image_filename")
+        if image_filename:
+            char_dir = os.path.dirname(file_path)
+            image_path = os.path.join(char_dir, image_filename)
+            if os.path.exists(image_path):
+                self._show_image_from_path(image_path)
+                self._current_image_filename = image_filename
+                self._selected_image_source_path = None
+                # keine neue Quelle gesetzt -> vorhandenes Bild bleibt, solange der User nichts Neues auswählt
+            else:
+                self._show_placeholder_image("Bilddatei nicht gefunden.")
+                self._current_image_filename = None
+        else:
+            self._show_placeholder_image("Kein Bild verfügbar.")
+            self._current_image_filename = None
+
         # Basisfelder via Component laden
         self.base_stats.load_data(character)
 

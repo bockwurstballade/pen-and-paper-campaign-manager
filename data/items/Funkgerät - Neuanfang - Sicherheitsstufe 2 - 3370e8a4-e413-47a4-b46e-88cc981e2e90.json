@@ -1,0 +1,21 @@
+{
+    "id": "3370e8a4-e413-47a4-b46e-88cc981e2e90",
+    "name": "Funkgerät - Neuanfang - Sicherheitsstufe 2",
+    "description": "",
+    "attributes": {},
+    "linked_conditions": [],
+    "is_weapon": false,
+    "damage_formula": "",
+    "weapon_category": null,
+    "weapon_state": {
+        "chambers": 0,
+        "chambers_capacity": 0,
+        "magazine": {
+            "inserted": false,
+            "count": 0,
+            "capacity": 0
+        },
+        "projectiles_loaded": 0,
+        "projectile_type": ""
+    }
+}
