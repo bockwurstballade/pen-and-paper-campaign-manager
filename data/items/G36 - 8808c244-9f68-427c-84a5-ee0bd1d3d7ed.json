@@ -1,0 +1,21 @@
+{
+    "id": "8808c244-9f68-427c-84a5-ee0bd1d3d7ed",
+    "name": "G36",
+    "description": "Schießt halt",
+    "attributes": {},
+    "is_weapon": true,
+    "damage_formula": "7W10",
+    "weapon_category": "Schusswaffe",
+    "weapon_state": {
+        "chambers": 1,
+        "chambers_capacity": 1,
+        "magazine": {
+            "inserted": true,
+            "count": 29,
+            "capacity": 30
+        },
+        "projectiles_loaded": 0,
+        "projectile_type": ""
+    },
+    "linked_conditions": []
+}

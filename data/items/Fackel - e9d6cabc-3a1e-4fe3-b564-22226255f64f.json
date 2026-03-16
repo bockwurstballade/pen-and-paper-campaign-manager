@@ -1,9 +1,10 @@
 {
-    "id": "536a24fd-f63a-4bcb-b666-5ea061ee94f9",
+    "id": "e9d6cabc-3a1e-4fe3-b564-22226255f64f",
     "name": "Fackel",
-    "description": "test",
+    "description": "brennt halt",
     "attributes": {},
     "is_weapon": false,
     "damage_formula": "",
+    "weapon_category": null,
     "linked_conditions": []
 }

@@ -13,6 +13,7 @@ import uuid
 from classes.ui.attribute_dialog import AttributeDialog
 from classes.core.data_manager import DataManager
 from classes.ui.ui_utils import style_groupbox
+from classes.ui.weapon_state_widget import WeaponStateWidget
 
 
 class CharacterCreationDialogItems:
@@ -76,53 +77,21 @@ class CharacterCreationDialogItems:
         cat_row.addWidget(cat_label)
         cat_row.addWidget(cat_combo)
 
-        # --- Waffen-Status ---
-        state_layout = QFormLayout()
+        # --- Waffen-Status (modulares Widget: nur Schusswaffe = Kammern/Magazin, Natural/Explosiv = Projektile) ---
+        weapon_state_widget = WeaponStateWidget(parent, title="Waffen-Status")
+        weapon_state_widget.setVisible(False)
 
-        # Schusswaffen
-        chambers_cap = QSpinBox(); chambers_cap.setRange(0, 10)
-        chambers_loaded = QSpinBox(); chambers_loaded.setRange(0, 10)
-        mag_inserted = QCheckBox("Magazin eingelegt")
-        mag_cap = QSpinBox(); mag_cap.setRange(0, 200)
-        mag_count = QSpinBox(); mag_count.setRange(0, 200)
-
-        # Bögen / Schleudern
-        proj_loaded = QSpinBox(); proj_loaded.setRange(0, 5)
-        proj_type = QLineEdit(); proj_type.setPlaceholderText("z. B. Pfeil, Kugel …")
-
-        for w in (chambers_cap, chambers_loaded, mag_inserted,
-                  mag_cap, mag_count, proj_loaded, proj_type):
-            w.setVisible(False)
-
-        state_layout.addRow("Kammern (max):", chambers_cap)
-        state_layout.addRow("Kammern geladen:", chambers_loaded)
-        state_layout.addRow(mag_inserted)
-        state_layout.addRow("Magazin Kapazität:", mag_cap)
-        state_layout.addRow("Magazin aktuell:", mag_count)
-        state_layout.addRow("Proj. geladen:", proj_loaded)
-        state_layout.addRow("Proj. Typ:", proj_type)
-
-        # --- Sichtbarkeits-Logik ---
         def on_weapon_toggle(state):
             checked = state == Qt.CheckState.Checked.value
             dmg_field.setVisible(checked)
             cat_label.setVisible(checked)
             cat_combo.setVisible(checked)
-            for w in (chambers_cap, chambers_loaded, mag_inserted,
-                      mag_cap, mag_count, proj_loaded, proj_type):
-                w.setVisible(False)
+            weapon_state_widget.setVisible(checked)
+            if checked:
+                weapon_state_widget.update_visibility(cat_combo.currentText())
 
         def on_category_changed(cat):
-            # alles ausblenden, dann gezielt zeigen
-            for w in (chambers_cap, chambers_loaded, mag_inserted,
-                      mag_cap, mag_count, proj_loaded, proj_type):
-                w.setVisible(False)
-            if cat == "Schusswaffe":
-                for w in (chambers_cap, chambers_loaded, mag_inserted, mag_cap, mag_count):
-                    w.setVisible(True)
-            elif cat in ("Natural", "Explosivwaffe"):
-                for w in (proj_loaded, proj_type):
-                    w.setVisible(True)
+            weapon_state_widget.update_visibility(cat)
 
         weapon_cb.stateChanged.connect(on_weapon_toggle)
         cat_combo.currentTextChanged.connect(on_category_changed)
@@ -137,7 +106,7 @@ class CharacterCreationDialogItems:
         vbox.addWidget(weapon_cb)
         vbox.addLayout(dmg_row)
         vbox.addLayout(cat_row)
-        vbox.addLayout(state_layout)
+        vbox.addWidget(weapon_state_widget)
         vbox.addWidget(add_attr_btn)
         vbox.addWidget(remove_btn)
 
@@ -150,13 +119,7 @@ class CharacterCreationDialogItems:
             "is_weapon_checkbox": weapon_cb,
             "damage_field": dmg_field,
             "weapon_category_combo": cat_combo,
-            "chambers_capacity_spin": chambers_cap,
-            "chambers_loaded_spin": chambers_loaded,
-            "magazine_inserted_cb": mag_inserted,
-            "magazine_capacity_spin": mag_cap,
-            "magazine_count_spin": mag_count,
-            "projectiles_loaded_spin": proj_loaded,
-            "projectile_type_input": proj_type,
+            "weapon_state_widget": weapon_state_widget,
         })
 
         # optional global speichern
@@ -186,6 +149,11 @@ class CharacterCreationDialogItems:
             if weapon_category_combo:
                 weapon_category = weapon_category_combo.currentText()
 
+        weapon_state = {}
+        ws_widget = data.get("weapon_state_widget")
+        if ws_widget:
+            weapon_state = ws_widget.get_state()
+
         # 📦 Neues Item-Objekt vorbereiten
         item_obj = {
             "id": str(uuid.uuid4()),
@@ -196,6 +164,7 @@ class CharacterCreationDialogItems:
             "is_weapon": is_weapon,
             "damage_formula": damage_formula,
             "weapon_category": weapon_category,
+            "weapon_state": weapon_state,
         }
 
         # 🗃️ Vorhandene Items laden
@@ -278,6 +247,11 @@ class CharacterCreationDialogItems:
             damage_formula = (dmg_field.text().strip() if dmg_field is not None else data.get("damage_formula", "")) if is_weapon else ""
             weapon_category = (cat_combo.currentText() if cat_combo is not None else data.get("weapon_category")) if is_weapon else None
 
+            weapon_state = {}
+            ws_widget = data.get("weapon_state_widget")
+            if ws_widget:
+                weapon_state = ws_widget.get_state()
+
             record = {
                 "id": data.get("id") or str(uuid.uuid4()),
                 "name": item_name,
@@ -287,6 +261,7 @@ class CharacterCreationDialogItems:
                 "is_weapon": is_weapon,
                 "damage_formula": damage_formula,
                 "weapon_category": weapon_category,
+                "weapon_state": weapon_state,
             }
 
             target = None
@@ -385,7 +360,7 @@ class CharacterCreationDialogItems:
         item_info: dict mit attributes, id, linked_conditions, is_weapon, damage_formula,
                    weapon_category, weapon_state (optional).
         """
-        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QFormLayout, QLabel, QCheckBox, QLineEdit, QComboBox, QHBoxLayout, QPushButton, QSpinBox
+        from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QFormLayout, QLabel, QCheckBox, QLineEdit, QComboBox, QHBoxLayout, QPushButton
         from PyQt6.QtCore import Qt
         import uuid
         parent = self.parent
@@ -428,44 +403,16 @@ class CharacterCreationDialogItems:
 
         weapon_state = item_info.get("weapon_state", {})
 
-        # vorhandene State-Widgets
-        chambers_capacity_spin = QSpinBox(); chambers_capacity_spin.setRange(0,10)
-        chambers_loaded_spin = QSpinBox(); chambers_loaded_spin.setRange(0,10)
-        magazine_inserted_cb = QCheckBox("Magazin eingelegt")
-        magazine_capacity_spin = QSpinBox(); magazine_capacity_spin.setRange(0,200)
-        magazine_count_spin = QSpinBox(); magazine_count_spin.setRange(0,200)
-        projectiles_loaded_spin = QSpinBox(); projectiles_loaded_spin.setRange(0,10)
-        projectile_type_input = QLineEdit()
+        # Waffen-Status über modulares Widget (nur Schusswaffe: Kammern/Magazin, Natural/Explosiv: Projektile)
+        weapon_state_widget = WeaponStateWidget(parent, title="Waffen-Status")
+        weapon_state_widget.set_state(weapon_state)
+        weapon_state_widget.update_visibility(item_info.get("weapon_category", ""))
 
-        # Werte setzen
-        chambers_capacity_spin.setValue(weapon_state.get("chambers_capacity", 0))
-        chambers_loaded_spin.setValue(weapon_state.get("chambers", 0))
-        magazine_inserted_cb.setChecked(weapon_state.get("magazine", {}).get("inserted", False))
-        magazine_capacity_spin.setValue(weapon_state.get("magazine", {}).get("capacity", 0))
-        magazine_count_spin.setValue(weapon_state.get("magazine", {}).get("count", 0))
-        projectiles_loaded_spin.setValue(weapon_state.get("projectiles_loaded", 0))
-        projectile_type_input.setText(weapon_state.get("projectile_type", ""))
-
-        # layout
-        state_layout = QFormLayout()
-        state_layout.addRow("Kammern (max):", chambers_capacity_spin)
-        state_layout.addRow("Kammern geladen:", chambers_loaded_spin)
-        state_layout.addRow(magazine_inserted_cb)
-        state_layout.addRow("Magazin Kapazität:", magazine_capacity_spin)
-        state_layout.addRow("Magazin aktuell:", magazine_count_spin)
-        state_layout.addRow("Proj. geladen:", projectiles_loaded_spin)
-        state_layout.addRow("Proj. Typ:", projectile_type_input)
-        item_layout.addLayout(state_layout)
+        item_layout.addWidget(weapon_state_widget)
 
         # Referenzen speichern
         parent.item_groups[item_name].update({
-            "chambers_capacity_spin": chambers_capacity_spin,
-            "chambers_loaded_spin": chambers_loaded_spin,
-            "magazine_inserted_cb": magazine_inserted_cb,
-            "magazine_capacity_spin": magazine_capacity_spin,
-            "magazine_count_spin": magazine_count_spin,
-            "projectiles_loaded_spin": projectiles_loaded_spin,
-            "projectile_type_input": projectile_type_input,
+            "weapon_state_widget": weapon_state_widget,
             "is_weapon_checkbox": weapon_checkbox,
             "damage_field": damage_input,
         })
@@ -485,14 +432,22 @@ class CharacterCreationDialogItems:
         item_layout.addLayout(weapon_cat_row)
         damage_input.setVisible(is_weapon)
 
-        def on_weapon_toggle(state, dmg_input=damage_input, cat_label=weapon_category_label, cat_combo=weapon_category_combo):
+        def on_weapon_toggle(state, dmg_input=damage_input, cat_label=weapon_category_label, cat_combo=weapon_category_combo, ws_widget=weapon_state_widget):
             is_checked = state == Qt.CheckState.Checked.value
             dmg_input.setVisible(is_checked)
             cat_label.setVisible(is_checked)
             cat_combo.setVisible(is_checked)
+            ws_widget.setVisible(is_checked)
+            if is_checked:
+                ws_widget.update_visibility(cat_combo.currentText())
 
+        weapon_state_widget.setVisible(is_weapon)
         on_weapon_toggle(Qt.CheckState.Checked.value if is_weapon else Qt.CheckState.Unchecked.value)
         weapon_checkbox.stateChanged.connect(on_weapon_toggle)
+
+        def on_category_changed(cat):
+            weapon_state_widget.update_visibility(cat)
+        weapon_category_combo.currentTextChanged.connect(on_category_changed)
 
         add_attr_button = QPushButton("+ Neue Eigenschaft")
         add_attr_button.clicked.connect(lambda _, item=item_name: self.add_attribute(item))
@@ -504,16 +459,6 @@ class CharacterCreationDialogItems:
         item_layout.addWidget(add_attr_button)
         item_layout.addWidget(remove_button)
         item_group.setLayout(item_layout)
-
-        # --- Sichtbarkeit der State-Felder je nach Kategorie ---
-        weapon_category = item_info.get("weapon_category", "")
-        if weapon_category == "Schusswaffe":
-            for w in (chambers_capacity_spin, chambers_loaded_spin,
-                    magazine_inserted_cb, magazine_capacity_spin, magazine_count_spin):
-                w.setVisible(True)
-        elif weapon_category in ("Natural", "Explosivwaffe"):
-            for w in (projectiles_loaded_spin, projectile_type_input):
-                w.setVisible(True)
 
         # Link info
         if linked_conditions:

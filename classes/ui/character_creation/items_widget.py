@@ -89,14 +89,13 @@ class ItemsWidget(QWidget):
                 damage_formula = data.get("damage_formula", "")
                 weapon_category = data.get("weapon_category", None)
 
-            items_data[item_name] = {
-                "attributes": data.get("attributes", {}),
-                "id": data.get("id", None),
-                "linked_conditions": data.get("linked_conditions", []),
-                "is_weapon": is_weapon,
-                "damage_formula": damage_formula,
-                "weapon_category": weapon_category,
-                "weapon_state": {
+            weapon_state = {}
+            ws_widget = data.get("weapon_state_widget")
+            if ws_widget:
+                weapon_state = ws_widget.get_state()
+            else:
+                # Fallback für alte Items ohne Widget (Einzel-Spins)
+                weapon_state = {
                     "chambers": data.get("chambers_loaded_spin").value() if data.get("chambers_loaded_spin") else 0,
                     "chambers_capacity": data.get("chambers_capacity_spin").value() if data.get("chambers_capacity_spin") else 0,
                     "magazine": {
@@ -107,6 +106,15 @@ class ItemsWidget(QWidget):
                     "projectiles_loaded": data.get("projectiles_loaded_spin").value() if data.get("projectiles_loaded_spin") else 0,
                     "projectile_type": data.get("projectile_type_input").text().strip() if data.get("projectile_type_input") else "",
                 }
+
+            items_data[item_name] = {
+                "attributes": data.get("attributes", {}),
+                "id": data.get("id", None),
+                "linked_conditions": data.get("linked_conditions", []),
+                "is_weapon": is_weapon,
+                "damage_formula": damage_formula,
+                "weapon_category": weapon_category,
+                "weapon_state": weapon_state,
             }
         return items_data
 

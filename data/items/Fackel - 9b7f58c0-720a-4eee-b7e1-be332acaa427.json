@@ -1,9 +1,0 @@
-{
-    "id": "9b7f58c0-720a-4eee-b7e1-be332acaa427",
-    "name": "Fackel",
-    "description": "Brennt",
-    "attributes": {},
-    "is_weapon": false,
-    "damage_formula": "",
-    "linked_conditions": []
-}

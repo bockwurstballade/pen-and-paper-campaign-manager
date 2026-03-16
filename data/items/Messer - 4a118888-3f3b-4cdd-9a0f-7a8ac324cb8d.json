@@ -1,0 +1,10 @@
+{
+    "id": "4a118888-3f3b-4cdd-9a0f-7a8ac324cb8d",
+    "name": "Messer",
+    "description": "Sticht halt",
+    "attributes": {},
+    "is_weapon": true,
+    "damage_formula": "2W10",
+    "weapon_category": "Nahkampfwaffe",
+    "linked_conditions": []
+}
