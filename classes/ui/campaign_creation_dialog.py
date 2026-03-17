@@ -1,10 +1,12 @@
 import uuid
+import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, 
     QPushButton, QMessageBox, QHBoxLayout
 )
 
 from classes.core.data_manager import DataManager
+from classes.ui.image_selector_widget import ImageSelectorWidget
 
 class CampaignCreationDialog(QDialog):
     def __init__(self, parent=None, campaign_data=None, file_path=None):
@@ -14,10 +16,15 @@ class CampaignCreationDialog(QDialog):
 
         self.loaded_file = file_path
         self.campaign_id = str(uuid.uuid4())
+        self._current_image_filename = None
         
         # --- Layout ---
         main_layout = QVBoxLayout(self)
         form_layout = QFormLayout()
+
+        # Bild
+        self.image_widget = ImageSelectorWidget(self, placeholder_text="Kein Bild verfügbar.")
+        main_layout.addWidget(self.image_widget)
 
         # Input Fields
         self.title_input = QLineEdit()
@@ -61,6 +68,14 @@ class CampaignCreationDialog(QDialog):
         self.campaign_id = data.get("id", self.campaign_id)
         self.title_input.setText(data.get("title", ""))
         self.ruleset_input.setText(data.get("ruleset", ""))
+
+        # Bild laden
+        self._current_image_filename = data.get("image_filename")
+        if self.loaded_file:
+            camp_dir = os.path.dirname(self.loaded_file)
+            self.image_widget.set_existing_image(folder_path=camp_dir, filename=self._current_image_filename)
+        else:
+            self.image_widget.clear()
         
         c_type = data.get("type", "Kampagne")
         index = self.type_combo.findText(c_type)
@@ -83,8 +98,16 @@ class CampaignCreationDialog(QDialog):
             return
 
         try:
-            saved_path = DataManager.save_campaign(data, self.loaded_file)
+            if not self.image_widget.selected_source_path and self._current_image_filename:
+                data["image_filename"] = self._current_image_filename
+
+            saved_path = DataManager.save_campaign(
+                data,
+                self.loaded_file,
+                image_source_path=self.image_widget.selected_source_path,
+            )
             self.loaded_file = saved_path
+            self._current_image_filename = data.get("image_filename")
             QMessageBox.information(self, "Erfolg", "Kampagne erfolgreich gespeichert!")
             self.accept()
         except Exception as e:

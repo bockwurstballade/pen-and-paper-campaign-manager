@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from classes.core.data_manager import DataManager
+from classes.ui.image_selector_widget import ImageSelectorWidget
 
 class ConditionEditorDialog(QDialog):
     def __init__(self, parent=None, available_skill_targets=None,
@@ -25,6 +26,7 @@ class ConditionEditorDialog(QDialog):
 
         self.loaded_file = None
         self.condition_id = None
+        self._current_image_filename = None
 
         # Falls nichts übergeben wurde: leere Listen
         self.available_skill_targets = available_skill_targets or []
@@ -32,6 +34,10 @@ class ConditionEditorDialog(QDialog):
         self.available_inspiration_targets = available_inspiration_targets or []
 
         main_layout = QVBoxLayout()
+
+        # Bild
+        self.image_widget = ImageSelectorWidget(self, placeholder_text="Kein Bild verfügbar.")
+        main_layout.addWidget(self.image_widget)
 
         form_layout = QFormLayout()
         self.name_input = QLineEdit()
@@ -107,6 +113,14 @@ class ConditionEditorDialog(QDialog):
         self.name_input.setText(cond_data.get("name", ""))
         self.description_input.setText(cond_data.get("description", ""))
 
+        # Bild laden (falls vorhanden)
+        self._current_image_filename = cond_data.get("image_filename")
+        if file_path:
+            cond_dir = os.path.dirname(file_path)
+            self.image_widget.set_existing_image(folder_path=cond_dir, filename=self._current_image_filename)
+        else:
+            self.image_widget.clear()
+
         effect_type = cond_data.get("effect_type", "keine Auswirkung")
         if effect_type not in ["keine Auswirkung", "missionsweit", "rundenbasiert"]:
             effect_type = "keine Auswirkung"
@@ -161,8 +175,17 @@ class ConditionEditorDialog(QDialog):
             "effect_value": effect_value if effect_type != "keine Auswirkung" else 0
         }
 
+        if not self.image_widget.selected_source_path and self._current_image_filename:
+            cond_obj["image_filename"] = self._current_image_filename
+
         try:
-            DataManager.save_condition(cond_obj)
+            saved_path = DataManager.save_condition(
+                cond_obj,
+                file_path=self.loaded_file,
+                image_source_path=self.image_widget.selected_source_path,
+            )
+            self.loaded_file = saved_path
+            self._current_image_filename = cond_obj.get("image_filename")
             QMessageBox.information(self, "Erfolg", f"Zustand '{name}' wurde gespeichert!")
             self.accept()
         except Exception as e:

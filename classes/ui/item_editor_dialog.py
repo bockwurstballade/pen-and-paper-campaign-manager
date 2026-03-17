@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt
 from classes.ui.condition_linker_widget import ConditionLinkerWidget
 from classes.ui.weapon_state_widget import WeaponStateWidget
 from classes.core.data_manager import DataManager
+from classes.ui.image_selector_widget import ImageSelectorWidget
 
 # Waffenkategorien (analog zu character_creation/items.py)
 WEAPON_CATEGORIES = [
@@ -37,12 +38,17 @@ class ItemEditorDialog(QDialog):
         # wenn wir ein bestehendes Item laden, merken wir uns die Quelle
         self.loaded_file = None
         self.item_id = None  # UUID des Items
+        self._current_image_filename = None
 
         # internes Attribut-Storage: {attr_name: {...}}
         self.attributes_inputs = {}
 
 
         main_layout = QVBoxLayout()
+
+        # Bild
+        self.image_widget = ImageSelectorWidget(self, placeholder_text="Kein Bild verfügbar.")
+        main_layout.addWidget(self.image_widget)
 
         # Basisdaten
         form_layout = QFormLayout()
@@ -219,6 +225,15 @@ class ItemEditorDialog(QDialog):
         self.name_input.setText(item_data.get("name", ""))
         self.description_input.setText(item_data.get("description", ""))
 
+        # Bild laden (falls vorhanden)
+        self._current_image_filename = item_data.get("image_filename")
+        if file_path:
+            item_dir = os.path.dirname(file_path)
+            self.image_widget.set_existing_image(folder_path=item_dir, filename=self._current_image_filename)
+        else:
+            # Kein Pfad bekannt -> nur Platzhalter
+            self.image_widget.clear()
+
         # Waffen-Checkbox, Schadensformel und Waffenkategorie laden
         is_weapon = item_data.get("is_weapon", False)
         self.is_weapon_checkbox.setChecked(is_weapon)
@@ -283,8 +298,19 @@ class ItemEditorDialog(QDialog):
             "linked_conditions": self.condition_linker.get_linked_conditions()
         }
 
+        # Bildreferenz beibehalten, wenn kein neues Bild gewählt wurde
+        if not self.image_widget.selected_source_path and self._current_image_filename:
+            item_obj["image_filename"] = self._current_image_filename
+
         try:
-            DataManager.save_item(item_obj)
+            saved_path = DataManager.save_item(
+                item_obj,
+                file_path=self.loaded_file,
+                image_source_path=self.image_widget.selected_source_path,
+            )
+            self.loaded_file = saved_path
+            # Bildreferenz nach Save aktualisieren (falls kopiert)
+            self._current_image_filename = item_obj.get("image_filename")
             QMessageBox.information(self, "Erfolg", f"Item '{name}' wurde gespeichert!")
             self.accept()
         except Exception as e:

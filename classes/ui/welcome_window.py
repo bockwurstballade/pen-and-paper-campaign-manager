@@ -37,6 +37,7 @@ class WelcomeWindow(QMainWindow):
         ("Neuen Zustand erstellen", "create_new_condition"),
         ("Bestehenden Zustand laden", "load_condition"),
         ("Neue Kampagne erstellen", "start_campaign_creation"),
+        ("Bestehende Kampagne laden", "load_campaign"),
         ("Würfelprobe", "open_roll_dialog"),
         ("Kampf starten", "start_combat"),
     ]
@@ -151,6 +152,38 @@ class WelcomeWindow(QMainWindow):
         dialog = CampaignCreationDialog(self)
         dialog.exec()
 
+    def load_campaign(self):
+        campaigns = DataManager.get_all_campaigns()
+        if not campaigns:
+            QMessageBox.information(
+                self,
+                "Hinweis",
+                "Es wurden noch keine Kampagnen gespeichert oder sie konnten nicht geladen werden.",
+            )
+            return
+
+        display_names = [c["display"] for c in campaigns]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Kampagne auswählen",
+            "Welche Kampagne möchtest du bearbeiten?",
+            display_names,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        idx = display_names.index(choice)
+        chosen = campaigns[idx]
+
+        dialog = CampaignCreationDialog(
+            self,
+            campaign_data=chosen["data"],
+            file_path=chosen["path"],
+        )
+        dialog.exec()
+
     def create_new_player(self):
         """Öffnet den Spieler-Editor leer für einen neuen Spieler."""
         dlg = PlayerEditorDialog(self)
@@ -230,13 +263,13 @@ class WelcomeWindow(QMainWindow):
 
     def load_item(self):
         """Lädt alle Items aus dem data/items/ Ordner, lässt den Nutzer eines auswählen und öffnet es im Editor."""
-        items_list = DataManager.get_all_items()
+        items_list = DataManager.get_all_items_meta()
         if not items_list:
             QMessageBox.information(self, "Hinweis", "Es wurden noch keine Items gespeichert oder sie konnten nicht geladen werden.")
             return
 
         # Auswahl anzeigen
-        item_names = [f"{it.get('name','(unbenannt)')} [{it.get('id','?')}]" for it in items_list]
+        item_names = [it["display"] for it in items_list]
         choice, ok = QInputDialog.getItem(
             self,
             "Item auswählen",
@@ -253,7 +286,7 @@ class WelcomeWindow(QMainWindow):
 
         # Editor öffnen und Item laden
         dlg = ItemEditorDialog(self)
-        dlg.load_item_data(chosen_item)
+        dlg.load_item_data(chosen_item["data"], chosen_item["path"])
         dlg.exec()
 
     def create_new_condition(self):
@@ -274,16 +307,13 @@ class WelcomeWindow(QMainWindow):
 
     def load_condition(self):
         """Lädt alle Zustände aus dem data/conditions/ Ordner, lässt den Nutzer einen wählen und öffnet ihn im Editor."""
-        conditions_list = DataManager.get_all_conditions()
+        conditions_list = DataManager.get_all_conditions_meta()
         if not conditions_list:
             QMessageBox.information(self, "Hinweis", "Es wurden noch keine Zustände gespeichert oder sie konnten nicht geladen werden.")
             return
 
         # Auswahl anzeigen
-        cond_choices = [
-            f"{c.get('name', '(unbenannt)')} [{c.get('id','?')}]"
-            for c in conditions_list
-        ]
+        cond_choices = [c["display"] for c in conditions_list]
 
         choice, ok = QInputDialog.getItem(
             self,
@@ -308,5 +338,5 @@ class WelcomeWindow(QMainWindow):
             available_category_targets=cat_targets,
             available_inspiration_targets=insp_targets
         )
-        dlg.load_condition_data(chosen_condition)
+        dlg.load_condition_data(chosen_condition["data"], chosen_condition["path"])
         dlg.exec()
