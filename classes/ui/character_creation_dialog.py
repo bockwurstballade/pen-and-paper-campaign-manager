@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QLineEdit, QComboBox, QFormLayout, QMessageBox, QGroupBox,
     QInputDialog, QHBoxLayout, QFileDialog, QTextEdit, QCheckBox, QScrollArea, QSpinBox
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QEvent, QTimer
 from PyQt6.QtGui import QPixmap
 
 ## eigene Funktionen
@@ -33,6 +33,8 @@ class CharacterCreationDialog(QDialog):
         self.char_id = None          # UUID des Charakters
         self._selected_image_source_path = None  # lokaler Pfad, den der User gewählt hat
         self._current_image_filename = None  # Dateiname im Charakter-Ordner (aus geladenem Charakter)
+        self._portrait_original_pixmap = None  # Originalbild für dynamisches Resizing
+        self._portrait_last_target_size = None  # QSize, um unnötiges Rescaling zu vermeiden
 
         super().__init__(parent)
         self.setWindowTitle("Neuen Charakter erstellen")
@@ -76,9 +78,12 @@ class CharacterCreationDialog(QDialog):
         image_layout = QVBoxLayout()
         self.portrait_label = QLabel("Kein Bild ausgewählt.")
         self.portrait_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.portrait_label.setMinimumHeight(160)
+        # Etwas höhere Mindesthöhe, damit das Bild seltener „abgeschnitten“ wirkt
+        self.portrait_label.setMinimumHeight(220)
         self.portrait_label.setStyleSheet("border: 1px solid gray;")
         self.portrait_label.setWordWrap(True)
+        # Reagiere auf Größenänderungen des Labels (Layout/ScrollArea), nicht nur auf Dialog-Resize
+        self.portrait_label.installEventFilter(self)
 
         self.select_image_button = QPushButton("Bild auswählen …")
         self.select_image_button.clicked.connect(self.choose_character_image)
@@ -120,6 +125,8 @@ class CharacterCreationDialog(QDialog):
 
     def _show_placeholder_image(self, text: str = "Kein Bild verfügbar."):
         """Zeigt einen einfachen Platzhaltertext im Bildbereich."""
+        self._portrait_original_pixmap = None
+        self._portrait_last_target_size = None
         self.portrait_label.setPixmap(QPixmap())
         self.portrait_label.setText(text)
 
@@ -129,13 +136,35 @@ class CharacterCreationDialog(QDialog):
         if pixmap.isNull():
             self._show_placeholder_image("Bild konnte nicht geladen werden.")
             return
-        scaled = pixmap.scaled(
-            self.portrait_label.width() if self.portrait_label.width() > 0 else 200,
-            self.portrait_label.height() if self.portrait_label.height() > 0 else 200,
+        self._portrait_original_pixmap = pixmap
+        self._portrait_last_target_size = None
+        self.portrait_label.setText("")
+        # Layout kann nach dem Setzen noch nachziehen -> einmal sofort und einmal im nächsten Event-Loop
+        self._update_portrait_pixmap()
+        QTimer.singleShot(0, self._update_portrait_pixmap)
+
+    def _update_portrait_pixmap(self):
+        """
+        Skaliert das aktuell geladene Bild auf die Größe des Labels,
+        wobei das Seitenverhältnis erhalten bleibt und das komplette Bild sichtbar bleibt.
+        """
+        if not self._portrait_original_pixmap:
+            return
+
+        label_size = self.portrait_label.size()
+        if label_size.width() <= 0 or label_size.height() <= 0:
+            return
+
+        # Nur neu skalieren, wenn sich das Zielmaß geändert hat (Performance bei großen Bildern)
+        if self._portrait_last_target_size == label_size:
+            return
+        self._portrait_last_target_size = label_size
+
+        scaled = self._portrait_original_pixmap.scaled(
+            label_size,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
-        self.portrait_label.setText("")
         self.portrait_label.setPixmap(scaled)
 
     def choose_character_image(self):
@@ -153,6 +182,20 @@ class CharacterCreationDialog(QDialog):
         # Wenn ein neues Bild gewählt wird, überschreiben wir bewusst die alte Referenz
         self._current_image_filename = None
         self._show_image_from_path(file_path)
+
+    def resizeEvent(self, event):
+        """
+        Reagiere auf Größenänderungen des Dialogs und skaliere das Portrait neu,
+        sodass es immer vollständig im sichtbaren Bereich bleibt.
+        """
+        super().resizeEvent(event)
+        self._update_portrait_pixmap()
+
+    def eventFilter(self, obj, event):
+        # Wenn das Portrait-Label durch Layout/ScrollArea resized wird, neu skalieren
+        if obj is self.portrait_label and event.type() == QEvent.Type.Resize:
+            self._update_portrait_pixmap()
+        return super().eventFilter(obj, event)
 
     def _reload_players_into_combo(self, selected_player_id: str = None):
         """
