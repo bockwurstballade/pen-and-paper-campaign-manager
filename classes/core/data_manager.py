@@ -19,6 +19,7 @@ class DataManager:
     CONDITIONS_DIR = os.path.join(BASE_DIR, "data", "conditions")
     LEGACY_CONDITIONS_FILE = os.path.join(BASE_DIR, "conditions.json")
     PLAYERS_DIR = os.path.join(BASE_DIR, "data", "players")
+    QUESTS_SUBDIR = "quests"
 
     @classmethod
     def _ensure_dirs(cls):
@@ -97,6 +98,101 @@ class DataManager:
         # Fallback: legacy anlegen
         os.makedirs(legacy, exist_ok=True)
         return legacy
+
+    @classmethod
+    def _get_campaign_quests_dir(cls, campaign_id: str) -> str:
+        base = cls._find_campaign_base_dir(str(campaign_id))
+        quests_dir = os.path.join(base, cls.QUESTS_SUBDIR)
+        os.makedirs(quests_dir, exist_ok=True)
+        return quests_dir
+
+    # --- QUEST MANAGEMENT ---
+
+    @classmethod
+    def get_all_quests_meta(cls, campaign_id: str) -> List[Dict[str, Any]]:
+        """Lädt alle Quests einer Kampagne inkl. Dateipfad und Anzeigetext."""
+        cls._ensure_dirs()
+        if not campaign_id:
+            return []
+
+        quests_dir = cls._get_campaign_quests_dir(str(campaign_id))
+        results: List[Dict[str, Any]] = []
+
+        if not os.path.exists(quests_dir):
+            return results
+
+        for root, _, filenames in os.walk(quests_dir):
+            for fname in filenames:
+                if not fname.lower().endswith(".json"):
+                    continue
+                full_path = os.path.join(root, fname)
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if "id" not in data or "title" not in data:
+                        continue
+                    qid = data.get("id", "???")
+                    title = data.get("title", "(unbenannt)")
+                    status = data.get("status", "")
+                    display = f"{title} [{qid[:8]}...]" + (f" – {status}" if status else "")
+                    results.append({"data": data, "path": full_path, "display": display})
+                except Exception as e:
+                    logger.error(f"Fehler beim Laden von Quest {full_path}: {e}")
+
+        return results
+
+    @classmethod
+    def save_quest(cls, quest_data: Dict[str, Any], file_path: str = None, image_source_path: Optional[str] = None) -> str:
+        """
+        Speichert eine Quest innerhalb der zugewiesenen Kampagne:
+        - data/campaigns/<Kampagne>/quests/<Titel> - <UUID>/<Titel> - <UUID>.json
+        - Optional: Bild im selben Ordner, Referenz in "image_filename"
+        """
+        cls._ensure_dirs()
+
+        campaign_id = quest_data.get("campaign_id")
+        if not campaign_id:
+            raise ValueError("Quest muss einer Kampagne zugewiesen sein (campaign_id fehlt).")
+
+        quest_id = quest_data.get("id")
+        if not quest_id:
+            import uuid
+            quest_id = str(uuid.uuid4())
+            quest_data["id"] = quest_id
+
+        title = quest_data.get("title", "Unbenannt")
+        safe_title = cls._safe_name(title, fallback="Unbenannt")
+
+        quests_dir = cls._get_campaign_quests_dir(str(campaign_id))
+        quest_folder_name = f"{safe_title} - {quest_id}"
+        quest_folder_path = os.path.join(quests_dir, quest_folder_name)
+        os.makedirs(quest_folder_path, exist_ok=True)
+
+        filename = f"{safe_title} - {quest_id}.json"
+        expected_path = os.path.join(quest_folder_path, filename)
+
+        if file_path and file_path != expected_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
+
+        copied = cls._copy_entity_image(
+            entity_safe_name=safe_title,
+            entity_id=str(quest_id),
+            target_folder_path=quest_folder_path,
+            image_source_path=image_source_path,
+        )
+        if copied:
+            quest_data["image_filename"] = copied
+
+        try:
+            with open(expected_path, "w", encoding="utf-8") as f:
+                json.dump(quest_data, f, indent=4, ensure_ascii=False)
+            return expected_path
+        except Exception as e:
+            logger.error(f"Fehler beim Speichern der Quest nach {expected_path}: {e}")
+            raise
 
     # --- CHARACTER MANAGEMENT ---
     

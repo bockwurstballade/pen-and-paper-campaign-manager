@@ -18,6 +18,7 @@ from classes.ui.character_creation_dialog import CharacterCreationDialog
 from classes.ui.item_editor_dialog import ItemEditorDialog
 from classes.ui.condition_editor_dialog import ConditionEditorDialog
 from classes.ui.campaign_creation_dialog import CampaignCreationDialog
+from classes.ui.quest_editor_dialog import QuestEditorDialog
 from classes.ui.player_editor_dialog import PlayerEditorDialog
 from classes.core.data_manager import DataManager
 
@@ -38,6 +39,8 @@ class WelcomeWindow(QMainWindow):
         ("Bestehenden Zustand laden", "load_condition"),
         ("Neue Kampagne erstellen", "start_campaign_creation"),
         ("Bestehende Kampagne laden", "load_campaign"),
+        ("Neue Quest erstellen", "create_new_quest"),
+        ("Bestehende Quest laden", "load_quest"),
         ("Würfelprobe", "open_roll_dialog"),
         ("Kampf starten", "start_combat"),
     ]
@@ -183,6 +186,78 @@ class WelcomeWindow(QMainWindow):
             file_path=chosen["path"],
         )
         dialog.exec()
+
+    def _choose_campaign(self):
+        campaigns = DataManager.get_all_campaigns()
+        if not campaigns:
+            QMessageBox.information(
+                self,
+                "Hinweis",
+                "Es wurden noch keine Kampagnen gespeichert oder sie konnten nicht geladen werden.",
+            )
+            return None
+
+        display_names = [c["display"] for c in campaigns]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Kampagne auswählen",
+            "Für welche Kampagne?",
+            display_names,
+            0,
+            False,
+        )
+        if not ok:
+            return None
+
+        idx = display_names.index(choice)
+        return campaigns[idx]
+
+    def create_new_quest(self):
+        chosen_campaign = self._choose_campaign()
+        if not chosen_campaign:
+            return
+
+        campaign_id = chosen_campaign["data"].get("id")
+        dlg = QuestEditorDialog(self, campaign_id=campaign_id)
+        dlg.exec()
+
+    def load_quest(self):
+        chosen_campaign = self._choose_campaign()
+        if not chosen_campaign:
+            return
+
+        campaign_id = chosen_campaign["data"].get("id")
+        quests = DataManager.get_all_quests_meta(str(campaign_id))
+        if not quests:
+            QMessageBox.information(
+                self,
+                "Hinweis",
+                "Es wurden noch keine Quests gespeichert oder sie konnten nicht geladen werden.",
+            )
+            return
+
+        display_names = [q["display"] for q in quests]
+        choice, ok = QInputDialog.getItem(
+            self,
+            "Quest auswählen",
+            "Welche Quest möchtest du bearbeiten?",
+            display_names,
+            0,
+            False,
+        )
+        if not ok:
+            return
+
+        idx = display_names.index(choice)
+        chosen = quests[idx]
+
+        dlg = QuestEditorDialog(
+            self,
+            campaign_id=str(campaign_id),
+            quest_data=chosen["data"],
+            file_path=chosen["path"],
+        )
+        dlg.exec()
 
     def create_new_player(self):
         """Öffnet den Spieler-Editor leer für einen neuen Spieler."""

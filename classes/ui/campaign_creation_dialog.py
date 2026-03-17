@@ -2,7 +2,7 @@ import uuid
 import os
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLineEdit, QComboBox, 
-    QPushButton, QMessageBox, QHBoxLayout
+    QPushButton, QMessageBox, QHBoxLayout, QTextEdit
 )
 
 from classes.core.data_manager import DataManager
@@ -41,9 +41,19 @@ class CampaignCreationDialog(QDialog):
             "West March"
         ])
 
+        self.description_input = QTextEdit()
+        self.description_input.setPlaceholderText("Neutrale Beschreibung der Kampagne …")
+        self.description_input.setFixedHeight(140)
+
+        self.teaser_input = QTextEdit()
+        self.teaser_input.setPlaceholderText("Teaser-Text (z. B. für Discord) …")
+        self.teaser_input.setFixedHeight(140)
+
         form_layout.addRow("Titel:", self.title_input)
         form_layout.addRow("Regelwerk:", self.ruleset_input)
         form_layout.addRow("Art:", self.type_combo)
+        form_layout.addRow("Beschreibung:", self.description_input)
+        form_layout.addRow("Teaser:", self.teaser_input)
 
         main_layout.addLayout(form_layout)
 
@@ -68,6 +78,8 @@ class CampaignCreationDialog(QDialog):
         self.campaign_id = data.get("id", self.campaign_id)
         self.title_input.setText(data.get("title", ""))
         self.ruleset_input.setText(data.get("ruleset", ""))
+        self.description_input.setPlainText(data.get("description", "") or "")
+        self.teaser_input.setPlainText(data.get("teaser", "") or "")
 
         # Bild laden
         self._current_image_filename = data.get("image_filename")
@@ -87,7 +99,9 @@ class CampaignCreationDialog(QDialog):
             "id": self.campaign_id,
             "title": self.title_input.text().strip(),
             "ruleset": self.ruleset_input.text().strip(),
-            "type": self.type_combo.currentText()
+            "type": self.type_combo.currentText(),
+            "description": self.description_input.toPlainText().strip(),
+            "teaser": self.teaser_input.toPlainText().strip(),
         }
 
     def save_campaign(self):
